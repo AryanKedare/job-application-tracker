@@ -50,7 +50,6 @@ export default function AddJobDialog({
     setLoading(true)
 
     try {
-      // Get current user from Supabase auth (uses browser cookies)
       const {
         data: { user },
         error: userError,

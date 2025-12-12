@@ -9,6 +9,15 @@ import AddJobDialog from '@/components/AddJobDialog'
 import { ArrowLeft, Plus, Download, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 
+const STATUS_OPTIONS: JobApplication['status'][] = [
+  'Bookmarked',
+  'Applied',
+  'Interviewing',
+  'Offer',
+  'Rejected',
+  'Ghosted',
+]
+
 export default function JobsTablePage() {
   const router = useRouter()
   const [authChecked, setAuthChecked] = useState(false)
@@ -33,7 +42,6 @@ export default function JobsTablePage() {
     checkAuth()
   }, [router])
 
-  // Fetch jobs after auth
   useEffect(() => {
     if (!authChecked) return
     fetchJobs()
@@ -53,6 +61,47 @@ export default function JobsTablePage() {
     }
   }
 
+  const handleStatusChange = async (
+    id: string,
+    newStatus: JobApplication['status'],
+  ) => {
+    setJobs((prev) =>
+      prev.map((job) => (job.id === id ? { ...job, status: newStatus } : job)),
+    )
+
+    const { error } = await supabase
+      .from('job_applications')
+      .update({ status: newStatus })
+      .eq('id', id)
+
+    if (error) {
+      console.error('Failed to update status:', error)
+      fetchJobs()
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    const ok = confirm('Delete this application?')
+    if (!ok) return
+
+    setJobs((prev) => prev.filter((job) => job.id !== id))
+
+    const { error } = await supabase
+      .from('job_applications')
+      .delete()
+      .eq('id', id)
+
+    if (error) {
+      console.error('Failed to delete job:', error)
+      fetchJobs()
+    }
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
+
   if (!authChecked || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
@@ -61,7 +110,6 @@ export default function JobsTablePage() {
     )
   }
 
-  // MAIN UI
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-10">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -89,13 +137,22 @@ export default function JobsTablePage() {
               </span>
             </p>
           </div>
-          <Button
-            onClick={() => setOpen(true)}
-            className="self-start bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold rounded-xl px-6 h-11"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add application
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => setOpen(true)}
+              className="self-start bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold rounded-xl px-6 h-11"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add application
+            </Button>
+            <Button
+              variant="outline"
+              className="self-start border-slate-700 text-slate-300 hover:bg-slate-800"
+              onClick={handleSignOut}
+            >
+              Sign out
+            </Button>
+          </div>
         </div>
 
         {/* Table */}
@@ -111,6 +168,7 @@ export default function JobsTablePage() {
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Resume</th>
                   <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -145,20 +203,22 @@ export default function JobsTablePage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={
-                          'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ' +
-                          (job.status === 'Rejected'
-                            ? 'bg-red-500/10 text-red-300 border border-red-500/40'
-                            : job.status === 'Offer'
-                            ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/40'
-                            : job.status === 'Interviewing'
-                            ? 'bg-amber-500/10 text-amber-300 border border-amber-500/40'
-                            : 'bg-slate-500/10 text-slate-300 border border-slate-500/40')
+                      <select
+                        value={job.status}
+                        onChange={(e) =>
+                          handleStatusChange(
+                            job.id,
+                            e.target.value as JobApplication['status'],
+                          )
                         }
+                        className="bg-slate-900 border border-slate-700 text-xs rounded-full px-2.5 py-1 text-slate-100"
                       >
-                        {job.status}
-                      </span>
+                        {STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-4 py-3">
                       {job.resume_url ? (
@@ -182,13 +242,23 @@ export default function JobsTablePage() {
                         ? new Date(job.date_applied).toLocaleDateString()
                         : '—'}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-red-500/60 text-red-400 hover:bg-red-500/10"
+                        onClick={() => handleDelete(job.id)}
+                      >
+                        Delete
+                      </Button>
+                    </td>
                   </tr>
                 ))}
 
                 {jobs.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-4 py-16 text-center text-slate-500"
                     >
                       No applications yet. Click “Add application” to create
