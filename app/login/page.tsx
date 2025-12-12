@@ -5,18 +5,30 @@ import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.auth.signInWithOtp({ email })
+
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ??
+      (typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost:3000')
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${baseUrl}/jobs`,
+      },
+    })
+
     setLoading(false)
+
     if (!error) {
       alert('Check your email for the login link.')
     } else {
