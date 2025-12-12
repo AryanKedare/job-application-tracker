@@ -18,9 +18,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { JobApplication } from '@/lib/types'
 import { Upload, Loader2 } from 'lucide-react'
-import { useSupabase } from '@/lib/supabaseProvider'
+import { supabase } from '@/lib/supabase'
+import { JobApplication } from '@/lib/types'
 
 interface AddJobDialogProps {
   open: boolean
@@ -33,8 +33,6 @@ export default function AddJobDialog({
   setOpen,
   onSuccess,
 }: AddJobDialogProps) {
-  const supabase = useSupabase()
-
   const [formData, setFormData] = useState({
     job_title: '',
     company: '',
@@ -44,7 +42,6 @@ export default function AddJobDialog({
     source: '',
     notes: '',
   })
-
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -53,13 +50,14 @@ export default function AddJobDialog({
     setLoading(true)
 
     try {
-      // ensure user is logged in
+      // Get current user from Supabase auth (uses browser cookies)
       const {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser()
+
       if (userError || !user) {
-        alert('You must be logged in to add applications.')
+        alert('You need to be logged in to add applications.')
         setLoading(false)
         return
       }
@@ -94,13 +92,12 @@ export default function AddJobDialog({
         source: formData.source,
         notes: formData.notes,
         resume_url: resumeUrl,
-        user_id: user.id, // satisfies RLS
+        user_id: user.id,
       }
 
       const { error: insertError } = await supabase
-  	.from('job_applications')
-  	.insert([payload], { defaultToNull: true })
-
+        .from('job_applications')
+        .insert([payload])
 
       if (insertError) {
         console.error(insertError)
@@ -132,13 +129,14 @@ export default function AddJobDialog({
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0 sm:max-w-3xl">
         <DialogHeader className="p-8 pb-6 border-b bg-gradient-to-r from-blue-50/5 to-indigo-50/5">
           <DialogTitle className="text-2xl font-bold text-slate-50">
-            Add new job
+            Add New Job Application
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          {/* Job details */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label htmlFor="job_title">Job title *</Label>
+              <Label htmlFor="job_title">Job Title *</Label>
               <Input
                 id="job_title"
                 required
@@ -162,9 +160,10 @@ export default function AddJobDialog({
             </div>
           </div>
 
+          {/* Link & status */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label htmlFor="job_link">Job link</Label>
+              <Label htmlFor="job_link">Job Link</Label>
               <Input
                 id="job_link"
                 type="url"
@@ -201,6 +200,7 @@ export default function AddJobDialog({
             </div>
           </div>
 
+          {/* Location & source */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <Label htmlFor="location">Location</Label>
@@ -226,8 +226,9 @@ export default function AddJobDialog({
             </div>
           </div>
 
+          {/* Resume upload */}
           <div className="space-y-2">
-            <Label>Resume (PDF/DOC)</Label>
+            <Label>Resume (PDF/DOC/DOCX)</Label>
             <div className="border-2 border-dashed border-slate-600 rounded-xl p-6 hover:border-emerald-400 transition-colors">
               <input
                 type="file"
@@ -255,6 +256,7 @@ export default function AddJobDialog({
             </div>
           </div>
 
+          {/* Notes */}
           <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>
             <Textarea
@@ -264,9 +266,11 @@ export default function AddJobDialog({
               onChange={(e) =>
                 setFormData({ ...formData, notes: e.target.value })
               }
+              className="resize-vertical"
             />
           </div>
 
+          {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
             <Button
               type="button"
