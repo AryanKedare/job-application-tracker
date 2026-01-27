@@ -1,9 +1,18 @@
 'use client'
+
+import { useState } from 'react'
+
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ExternalLink, Download, Edit3, Trash2 } from 'lucide-react'
+import { ExternalLink, Download, Edit3, Trash2, StickyNote } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { JobApplication } from '@/lib/types'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 interface JobCardProps {
   job: JobApplication
@@ -11,11 +20,14 @@ interface JobCardProps {
 }
 
 export default function JobCard({ job, onUpdate }: JobCardProps) {
+  const [notesOpen, setNotesOpen] = useState(false)
+
   const updateStatus = async (newStatus: JobApplication['status']) => {
     await supabase
       .from('job_applications')
       .update({ status: newStatus })
       .eq('id', job.id)
+
     onUpdate()
   }
 
@@ -27,49 +39,138 @@ export default function JobCard({ job, onUpdate }: JobCardProps) {
   }
 
   return (
-    <Card className="group/job hover:shadow-xl transition-all border-0 bg-gradient-to-br from-white/90 to-blue-50/50 backdrop-blur-sm hover:-translate-y-1 hover:scale-[1.02] overflow-hidden">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg font-bold line-clamp-1 group-hover/job:line-clamp-none">{job.job_title}</CardTitle>
-        <CardDescription className="font-semibold text-blue-600">{job.company}</CardDescription>
-      </CardHeader>
-      <CardContent className="pt-0 pb-4 space-y-3">
-        {job.location && (
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            📍 {job.location}
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <span className="px-3 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
-            {job.status}
-          </span>
-          {job.source && (
-            <span className="px-3 py-1 bg-gray-100 text-gray-800 text-xs font-medium rounded-full">
-              {job.source}
+    <>
+      <Card className="flex flex-col justify-between">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between gap-2">
+            <span>{job.job_title}</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {job.status}
             </span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2 pt-2">
-          {job.job_link && (
-            <Button variant="outline" size="sm" asChild className="h-9">
-              <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1">
-                <ExternalLink className="w-4 h-4" />
-                View Job
-              </a>
-            </Button>
-          )}
-          {job.resume_url && (
-            <Button variant="ghost" size="sm" asChild className="h-9 border-dashed">
-              <a href={job.resume_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1">
-                <Download className="w-4 h-4" />
-                Resume
-              </a>
-            </Button>
-          )}
-        </div>
-        {job.notes && (
-          <p className="text-xs text-gray-600 line-clamp-2">{job.notes}</p>
-        )}
-      </CardContent>
-    </Card>
+          </CardTitle>
+          <CardDescription className="flex items-center justify-between gap-2">
+            <span>{job.company}</span>
+            {job.location && (
+              <span className="text-xs text-muted-foreground">📍 {job.location}</span>
+            )}
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="flex flex-col gap-3">
+          {/* Source / links / notes */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {job.source && (
+              <span className="text-xs text-muted-foreground">
+                Source: {job.source}
+              </span>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              {job.job_link && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={job.job_link} target="_blank" rel="noreferrer">
+                    <ExternalLink className="mr-1 h-3 w-3" />
+                    View Job
+                  </a>
+                </Button>
+              )}
+
+              {job.resume_url && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={job.resume_url} target="_blank" rel="noreferrer">
+                    <Download className="mr-1 h-3 w-3" />
+                    Resume
+                  </a>
+                </Button>
+              )}
+
+              {job.notes && job.notes.trim().length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setNotesOpen(true)}
+                >
+                  <StickyNote className="mr-1 h-3 w-3" />
+                  View notes
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Quick status + actions */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Quick status:</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => updateStatus('Applied')}
+              >
+                Applied
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => updateStatus('Interviewing')}
+              >
+                Interviewing
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => updateStatus('Offer')}
+              >
+                Offer
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => updateStatus('Rejected')}
+              >
+                Rejected
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Reserved for future edit flow */}
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Edit application"
+              >
+                <Edit3 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Delete application"
+                onClick={deleteJob}
+              >
+                <Trash2 className="h-4 w-4 text-red-500" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notes dialog */}
+      <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Notes for {job.job_title}</DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 space-y-2 text-sm">
+            <p className="text-muted-foreground">
+              Company:{' '}
+              <span className="font-medium text-foreground">{job.company}</span>
+            </p>
+            <div className="whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-sm">
+              {job.notes || 'No notes added yet.'}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
+
