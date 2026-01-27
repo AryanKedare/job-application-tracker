@@ -215,9 +215,22 @@ export default function JobsTablePage() {
 
           {/* Table */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 shadow-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-900/90 border-b border-slate-800">
+            <div className="max-h-[70vh] overflow-y-auto">
+              <table className="min-w-full text-sm table-fixed">
+                <colgroup>
+                  <col className="w-[18%]" /> {/* Company */}
+                  <col className="w-[20%]" /> {/* Role */}
+                  <col className="w-[10%]" /> {/* Location */}
+                  <col className="w-[10%]" /> {/* Apply */}
+                  <col className="w-[12%]" /> {/* Status */}
+                  <col className="w-[10%]" /> {/* Resume */}
+                  <col className="w-[10%]" /> {/* Notes */}
+                  <col className="w-[10%]" /> {/* Date */}
+                  <col className="w-[5%]" /> {/* Edit */}
+                  <col className="w-[5%]" /> {/* Delete */}
+                </colgroup>
+
+                <thead className="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-10">
                   <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">
                     <th className="px-4 py-3">Company</th>
                     <th className="px-4 py-3">Role</th>
@@ -231,16 +244,17 @@ export default function JobsTablePage() {
                     <th className="px-4 py-3">Delete</th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-slate-800">
                   {jobs.map((job) => (
                     <tr key={job.id} className="hover:bg-slate-900/60">
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="font-medium text-slate-100">
+                        <div className="font-medium text-slate-100 truncate">
                           {job.company || '-'}
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-50">
+                        <div className="font-semibold text-slate-50 truncate">
                           {job.job_title}
                         </div>
                       </td>
@@ -271,7 +285,7 @@ export default function JobsTablePage() {
                               e.target.value as JobApplication['status'],
                             )
                           }
-                          className="bg-slate-900 border border-slate-700 text-xs rounded-full px-2.5 py-1 text-slate-100"
+                          className="bg-slate-900 border border-slate-700 text-xs rounded-full px-2.5 py-1 text-slate-100 max-w-[120px]"
                         >
                           {STATUS_OPTIONS.map((status) => (
                             <option key={status} value={status}>
