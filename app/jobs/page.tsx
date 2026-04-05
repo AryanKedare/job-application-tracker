@@ -38,18 +38,16 @@ const STATUS_STYLE: Record<JobApplication['status'], { pill: string; dot: string
   Ghosted:      { pill: 'bg-slate-600/30 text-slate-400 border border-slate-600/30',        dot: 'bg-slate-500' },
 }
 
-/** Extract the bare hostname from a URL string, e.g. "https://jobs.bankofireland.com/..." → "bankofireland.com" */
+/** Extract the bare hostname from a URL string */
 function extractDomain(url: string): string | null {
   try {
     const { hostname } = new URL(url.startsWith('http') ? url : `https://${url}`)
-    // Strip common subdomains (www, jobs, careers, apply, uk, ie, …)
     return hostname.replace(/^(www\d?|jobs?|careers?|apply|work|hire|talent|ie|uk|us)\./i, '')
   } catch {
     return null
   }
 }
 
-/** Ordered list of logo URL builders – tried left-to-right until one succeeds */
 function logoSources(domain: string): string[] {
   return [
     `https://logos.hunter.io/${domain}`,
@@ -57,14 +55,38 @@ function logoSources(domain: string): string[] {
   ]
 }
 
+// Shared avatar shell — used by both logo and initials variants
+function AvatarShell({ children, colorClass }: { children: React.ReactNode; colorClass?: string }) {
+  return (
+    <div
+      className={`
+        w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center
+        shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10
+        ${colorClass ?? 'bg-white'}
+      `}
+    >
+      {children}
+    </div>
+  )
+}
+
 function InitialsAvatar({ name }: { name: string }) {
   const initials = name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')
-  const colors = ['bg-blue-600', 'bg-violet-600', 'bg-emerald-600', 'bg-amber-600', 'bg-rose-600', 'bg-cyan-600']
-  const color = colors[name.charCodeAt(0) % colors.length]
+  const palettes = [
+    { bg: 'bg-blue-600',   text: 'text-white' },
+    { bg: 'bg-violet-600', text: 'text-white' },
+    { bg: 'bg-emerald-600',text: 'text-white' },
+    { bg: 'bg-amber-500',  text: 'text-white' },
+    { bg: 'bg-rose-600',   text: 'text-white' },
+    { bg: 'bg-cyan-600',   text: 'text-white' },
+    { bg: 'bg-indigo-600', text: 'text-white' },
+    { bg: 'bg-teal-600',   text: 'text-white' },
+  ]
+  const { bg, text } = palettes[name.charCodeAt(0) % palettes.length]
   return (
-    <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center text-xs font-bold text-white flex-shrink-0`}>
-      {initials}
-    </div>
+    <AvatarShell colorClass={bg}>
+      <span className={`text-xs font-bold tracking-wide ${text}`}>{initials}</span>
+    </AvatarShell>
   )
 }
 
@@ -72,9 +94,8 @@ function CompanyAvatar({ name, jobLink }: { name: string; jobLink?: string }) {
   const domain = jobLink ? extractDomain(jobLink) : null
   const sources = domain ? logoSources(domain) : []
   const [srcIndex, setSrcIndex] = useState(0)
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed]     = useState(false)
 
-  // Reset when the job row changes
   useEffect(() => { setSrcIndex(0); setFailed(false) }, [domain])
 
   if (!domain || failed || sources.length === 0) {
@@ -82,23 +103,21 @@ function CompanyAvatar({ name, jobLink }: { name: string; jobLink?: string }) {
   }
 
   return (
-    <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden flex-shrink-0">
+    // White padded container — logos look clean regardless of their own background
+    <AvatarShell colorClass="bg-white">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={sources[srcIndex]}
         alt={`${name} logo`}
-        width={32}
-        height={32}
-        className="w-6 h-6 object-contain"
+        width={28}
+        height={28}
+        className="w-7 h-7 object-contain p-0.5"
         onError={() => {
-          if (srcIndex + 1 < sources.length) {
-            setSrcIndex(srcIndex + 1)
-          } else {
-            setFailed(true)
-          }
+          if (srcIndex + 1 < sources.length) setSrcIndex(srcIndex + 1)
+          else setFailed(true)
         }}
       />
-    </div>
+    </AvatarShell>
   )
 }
 
@@ -107,7 +126,7 @@ interface ToastState { message: string; type: 'success' | 'error' }
 export default function JobsTablePage() {
   const router = useRouter()
   const [authChecked, setAuthChecked] = useState(false)
-  const [userId, setUserId]     = useState('')
+  const [userId, setUserId]       = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [userName, setUserName]   = useState<string | null>(null)
   const [jobs, setJobs]           = useState<JobApplication[]>([])
@@ -176,10 +195,10 @@ export default function JobsTablePage() {
     else showToast(`Deleted "${job.job_title}".`, 'success')
   }
 
-  const handleAddSuccess    = (j: JobApplication) => { setJobs((p) => [j, ...p]); showToast('Application added!', 'success') }
-  const handleEditSuccess   = (j: JobApplication) => { setJobs((p) => p.map((x) => (x.id === j.id ? j : x))); showToast('Updated!', 'success'); setEditDialog({ open: false, job: null }) }
-  const handleSignOut       = async () => { await supabase.auth.signOut(); router.replace('/login') }
-  const handleDataDeleted   = () => { setJobs([]); showToast('All data deleted.', 'success') }
+  const handleAddSuccess  = (j: JobApplication) => { setJobs((p) => [j, ...p]); showToast('Application added!', 'success') }
+  const handleEditSuccess = (j: JobApplication) => { setJobs((p) => p.map((x) => (x.id === j.id ? j : x))); showToast('Updated!', 'success'); setEditDialog({ open: false, job: null }) }
+  const handleSignOut     = async () => { await supabase.auth.signOut(); router.replace('/login') }
+  const handleDataDeleted = () => { setJobs([]); showToast('All data deleted.', 'success') }
 
   const statsCount = useMemo(() => ({
     applied:      jobs.filter((j) => j.status === 'Applied').length,
@@ -230,8 +249,7 @@ export default function JobsTablePage() {
                 <Plus className="w-4 h-4 mr-2" /> Add application
               </Button>
               <Button
-                variant="outline"
-                size="icon"
+                variant="outline" size="icon"
                 className="border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100 h-10 w-10"
                 onClick={() => setSettingsOpen(true)}
                 title="Account settings"
@@ -244,7 +262,7 @@ export default function JobsTablePage() {
             </div>
           </div>
 
-          {/* Stats strip */}
+          {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
             <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl px-4 py-3">
               <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
@@ -346,17 +364,17 @@ export default function JobsTablePage() {
                   <tbody className="divide-y divide-slate-800/70">
                     {filteredJobs.map((job) => (
                       <tr key={job.id} className="group hover:bg-slate-800/40 transition-colors">
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-2.5 min-w-[140px]">
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3 min-w-[150px]">
                             <CompanyAvatar name={job.company || job.job_title} jobLink={job.job_link} />
-                            <span className="font-medium text-slate-100 truncate max-w-[130px]">{job.company || '—'}</span>
+                            <span className="font-medium text-slate-100 truncate max-w-[120px] leading-tight">{job.company || '—'}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-4 max-w-[240px]">
+                        <td className="px-5 py-3.5 max-w-[240px]">
                           <span className="font-semibold text-slate-50 truncate block">{job.job_title}</span>
                         </td>
-                        <td className="px-5 py-4 text-slate-400 whitespace-nowrap text-xs">{job.location || '—'}</td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap text-xs">{job.location || '—'}</td>
+                        <td className="px-5 py-3.5">
                           <div className="relative inline-block">
                             <select
                               value={job.status}
@@ -371,7 +389,7 @@ export default function JobsTablePage() {
                             <span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full pointer-events-none ${STATUS_STYLE[job.status].dot}`} />
                           </div>
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5">
                           {job.job_link ? (
                             <a href={job.job_link} target="_blank" rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors">
@@ -379,7 +397,7 @@ export default function JobsTablePage() {
                             </a>
                           ) : <span className="text-xs text-slate-600">—</span>}
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5">
                           {job.resume_url ? (
                             <a href={job.resume_url} target="_blank" rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full px-2.5 py-1 transition-colors">
@@ -387,7 +405,7 @@ export default function JobsTablePage() {
                             </a>
                           ) : <span className="text-xs text-slate-600">—</span>}
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5">
                           {job.notes?.trim() ? (
                             <button
                               onClick={() => setNotesDialog({ open: true, notes: job.notes!, jobTitle: job.job_title, company: job.company })}
@@ -396,10 +414,10 @@ export default function JobsTablePage() {
                             </button>
                           ) : <span className="text-xs text-slate-600">—</span>}
                         </td>
-                        <td className="px-5 py-4 text-slate-500 whitespace-nowrap text-xs">
+                        <td className="px-5 py-3.5 text-slate-500 whitespace-nowrap text-xs">
                           {job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}
                         </td>
-                        <td className="px-5 py-4">
+                        <td className="px-5 py-3.5">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => setEditDialog({ open: true, job })}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-slate-100 hover:bg-slate-700 transition-colors"
@@ -430,12 +448,8 @@ export default function JobsTablePage() {
       <DeleteConfirmDialog open={deleteDialog.open} jobTitle={deleteDialog.job?.job_title ?? ''} company={deleteDialog.job?.company ?? ''} onConfirm={handleDeleteConfirm} onCancel={() => setDeleteDialog({ open: false, job: null })} />
 
       <AccountSettingsDialog
-        open={settingsOpen}
-        setOpen={setSettingsOpen}
-        jobs={jobs}
-        userId={userId}
-        userEmail={userEmail}
-        userName={userName}
+        open={settingsOpen} setOpen={setSettingsOpen}
+        jobs={jobs} userId={userId} userEmail={userEmail} userName={userName}
         onDataDeleted={handleDataDeleted}
       />
 
@@ -451,7 +465,8 @@ export default function JobsTablePage() {
             <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{notesDialog.notes || 'No notes.'}</p>
           </div>
           <div className="flex-shrink-0 px-6 py-4 border-t border-slate-800">
-            <Button variant="outline" size="sm" className="border-slate-700 text-slate-300 hover:bg-slate-800" onClick={() => setNotesDialog((p) => ({ ...p, open: false }))}>
+            <Button variant="outline" size="sm" className="border-slate-700 text-slate-300 hover:bg-slate-800"
+              onClick={() => setNotesDialog((p) => ({ ...p, open: false }))}>
               Close
             </Button>
           </div>
