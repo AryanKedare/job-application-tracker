@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { ArrowRight, FileText, Briefcase, TrendingUp, Trophy, XCircle, Ghost, Bookmark, LogOut } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { ArrowRight, FileText, Briefcase, TrendingUp, Trophy, XCircle, Ghost, Bookmark, LogOut, Pencil, Check } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { JobApplication } from '@/lib/types'
 
@@ -28,6 +29,12 @@ export default function Home() {
   const [total, setTotal] = useState<number | null>(null)
   const [loggedIn, setLoggedIn] = useState(false)
   const [userName, setUserName] = useState<string | null>(null)
+  const [hasRealName, setHasRealName] = useState(false)
+
+  // Inline name editing
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
 
   useEffect(() => {
     const loadData = async () => {
@@ -35,13 +42,9 @@ export default function Home() {
       if (!user) return
 
       setLoggedIn(true)
-      // Try full_name from metadata, fall back to email prefix
-      const name =
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.email?.split('@')[0] ||
-        null
-      setUserName(name)
+      const realName = user.user_metadata?.full_name || user.user_metadata?.name || null
+      setHasRealName(!!realName)
+      setUserName(realName ?? user.email?.split('@')[0] ?? null)
 
       const { data } = await supabase
         .from('job_applications')
@@ -68,6 +71,20 @@ export default function Home() {
     router.refresh()
   }
 
+  const handleSaveName = async () => {
+    if (!nameInput.trim()) return
+    setSavingName(true)
+    const { error } = await supabase.auth.updateUser({
+      data: { full_name: nameInput.trim() },
+    })
+    setSavingName(false)
+    if (!error) {
+      setUserName(nameInput.trim())
+      setHasRealName(true)
+      setEditingName(false)
+    }
+  }
+
   return (
     <div className="min-h-screen py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
@@ -76,9 +93,41 @@ export default function Home() {
         <div className="flex justify-end mb-6 min-h-[36px]">
           {loggedIn ? (
             <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-400">
-                Hi, <span className="text-slate-200 font-semibold">{userName}</span> 👋
-              </span>
+              {editingName ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    autoFocus
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false) }}
+                    placeholder="Your name"
+                    className="h-7 w-36 text-sm bg-slate-800 border-slate-600 px-2 py-1"
+                  />
+                  <button
+                    onClick={handleSaveName}
+                    disabled={savingName}
+                    className="text-emerald-400 hover:text-emerald-300 transition-colors"
+                    title="Save name"
+                  >
+                    <Check className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm text-slate-400">
+                    Hi, <span className="text-slate-200 font-semibold">{userName}</span> 👋
+                  </span>
+                  {!hasRealName && (
+                    <button
+                      onClick={() => { setEditingName(true); setNameInput('') }}
+                      className="text-slate-500 hover:text-slate-300 transition-colors"
+                      title="Set your name"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
               <button
                 onClick={handleSignOut}
                 className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
@@ -96,9 +145,24 @@ export default function Home() {
           )}
         </div>
 
+        {/* Name prompt banner — only for users without a real name */}
+        {loggedIn && !hasRealName && !editingName && (
+          <div className="mb-6 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+            <p className="text-sm text-amber-300">
+              👋 Looks like you don&apos;t have a name set yet. Add one so we can greet you properly!
+            </p>
+            <button
+              onClick={() => { setEditingName(true); setNameInput('') }}
+              className="ml-4 text-xs font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2 whitespace-nowrap"
+            >
+              Set name
+            </button>
+          </div>
+        )}
+
         {/* Hero */}
         <div className="mb-12 text-center">
-          {loggedIn && userName && (
+          {loggedIn && hasRealName && userName && (
             <p className="text-slate-400 text-base mb-3">
               Welcome back, <span className="text-slate-200 font-semibold">{userName}</span>!
             </p>
