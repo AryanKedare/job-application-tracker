@@ -38,13 +38,66 @@ const STATUS_STYLE: Record<JobApplication['status'], { pill: string; dot: string
   Ghosted:      { pill: 'bg-slate-600/30 text-slate-400 border border-slate-600/30',        dot: 'bg-slate-500' },
 }
 
-function CompanyAvatar({ name }: { name: string }) {
+/** Extract the bare hostname from a URL string, e.g. "https://jobs.bankofireland.com/..." → "bankofireland.com" */
+function extractDomain(url: string): string | null {
+  try {
+    const { hostname } = new URL(url.startsWith('http') ? url : `https://${url}`)
+    // Strip common subdomains (www, jobs, careers, apply, uk, ie, …)
+    return hostname.replace(/^(www\d?|jobs?|careers?|apply|work|hire|talent|ie|uk|us)\./i, '')
+  } catch {
+    return null
+  }
+}
+
+/** Ordered list of logo URL builders – tried left-to-right until one succeeds */
+function logoSources(domain: string): string[] {
+  return [
+    `https://logos.hunter.io/${domain}`,
+    `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+  ]
+}
+
+function InitialsAvatar({ name }: { name: string }) {
   const initials = name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')
-  const colors = ['bg-blue-600','bg-violet-600','bg-emerald-600','bg-amber-600','bg-rose-600','bg-cyan-600']
+  const colors = ['bg-blue-600', 'bg-violet-600', 'bg-emerald-600', 'bg-amber-600', 'bg-rose-600', 'bg-cyan-600']
   const color = colors[name.charCodeAt(0) % colors.length]
   return (
     <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center text-xs font-bold text-white flex-shrink-0`}>
       {initials}
+    </div>
+  )
+}
+
+function CompanyAvatar({ name, jobLink }: { name: string; jobLink?: string }) {
+  const domain = jobLink ? extractDomain(jobLink) : null
+  const sources = domain ? logoSources(domain) : []
+  const [srcIndex, setSrcIndex] = useState(0)
+  const [failed, setFailed] = useState(false)
+
+  // Reset when the job row changes
+  useEffect(() => { setSrcIndex(0); setFailed(false) }, [domain])
+
+  if (!domain || failed || sources.length === 0) {
+    return <InitialsAvatar name={name} />
+  }
+
+  return (
+    <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/50 flex items-center justify-center overflow-hidden flex-shrink-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={sources[srcIndex]}
+        alt={`${name} logo`}
+        width={32}
+        height={32}
+        className="w-6 h-6 object-contain"
+        onError={() => {
+          if (srcIndex + 1 < sources.length) {
+            setSrcIndex(srcIndex + 1)
+          } else {
+            setFailed(true)
+          }
+        }}
+      />
     </div>
   )
 }
@@ -295,7 +348,7 @@ export default function JobsTablePage() {
                       <tr key={job.id} className="group hover:bg-slate-800/40 transition-colors">
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2.5 min-w-[140px]">
-                            <CompanyAvatar name={job.company || job.job_title} />
+                            <CompanyAvatar name={job.company || job.job_title} jobLink={job.job_link} />
                             <span className="font-medium text-slate-100 truncate max-w-[130px]">{job.company || '—'}</span>
                           </div>
                         </td>
