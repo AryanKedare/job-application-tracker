@@ -1,10 +1,11 @@
+// app/page.tsx
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ArrowRight, FileText, Briefcase, TrendingUp, Trophy, XCircle, Ghost, Bookmark, LogOut, Pencil, Check } from 'lucide-react'
+import { ArrowRight, FileText, Briefcase, TrendingUp, Trophy, XCircle, Ghost, Bookmark, LogOut, Pencil, Check, Github } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { JobApplication } from '@/lib/types'
 
@@ -86,8 +87,8 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen flex flex-col py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto flex-1 w-full">
 
         {/* Top bar */}
         <div className="flex justify-end mb-6 min-h-[36px]">
@@ -145,7 +146,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Name prompt banner — only for users without a real name */}
+        {/* Name prompt banner */}
         {loggedIn && !hasRealName && !editingName && (
           <div className="mb-6 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
             <p className="text-sm text-amber-300">
@@ -240,6 +241,24 @@ export default function Home() {
 
         </div>
       </div>
+
+      {/* Footer */}
+      <footer className="max-w-4xl mx-auto w-full border-t border-slate-800/60 pt-6 pb-2 px-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-xs text-slate-600">
+            Built with Next.js, Supabase &amp; Tailwind CSS
+          </p>
+          <a
+            href="https://github.com/AryanKedare/job-application-tracker"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-xs text-slate-500 hover:text-slate-200 transition-colors group"
+          >
+            <Github className="w-4 h-4 group-hover:scale-110 transition-transform" />
+            <span>View source on GitHub</span>
+          </a>
+        </div>
+      </footer>
     </div>
   )
 }
