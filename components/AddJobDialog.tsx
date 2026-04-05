@@ -80,6 +80,7 @@ export default function AddJobDialog({
     setResumeFile(file)
   }
 
+  // Uploads the file to Storage and returns the public URL, or null on failure
   const uploadResume = async (): Promise<string | null> => {
     if (!resumeFile) return null
     setUploadingResume(true)
@@ -100,39 +101,37 @@ export default function AddJobDialog({
     e.preventDefault()
     setSubmitting(true)
 
+    // Upload resume first so we have the URL ready for the DB row
+    const resumeUrl = resumeFile ? await uploadResume() : null
+    const resumeField = resumeUrl ? { resume_url: resumeUrl } : {}
+
     if (editJob) {
       const { data, error } = await supabase
         .from('job_applications')
-        .update({ ...formData })
+        .update({ ...formData, ...resumeField })
         .eq('id', editJob.id)
         .eq('user_id', userId)
         .select()
         .single()
 
+      setSubmitting(false)
       if (error || !data) {
-        setSubmitting(false)
         onError('Failed to update application. Please try again.')
         return
       }
-
-      if (resumeFile) await uploadResume()
-      setSubmitting(false)
       onSuccess(data as JobApplication)
     } else {
       const { data, error } = await supabase
         .from('job_applications')
-        .insert([{ ...formData, user_id: userId }])
+        .insert([{ ...formData, user_id: userId, ...resumeField }])
         .select()
         .single()
 
+      setSubmitting(false)
       if (error || !data) {
-        setSubmitting(false)
         onError('Failed to add application. Please try again.')
         return
       }
-
-      if (resumeFile) await uploadResume()
-      setSubmitting(false)
       onSuccess(data as JobApplication)
     }
 
@@ -291,7 +290,13 @@ export default function AddJobDialog({
                 disabled={submitting || uploadingResume}
                 className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold"
               >
-                {uploadingResume ? 'Uploading resume…' : submitting ? 'Saving…' : editJob ? 'Save changes' : 'Add Application'}
+                {uploadingResume
+                  ? 'Uploading resume…'
+                  : submitting
+                  ? 'Saving…'
+                  : editJob
+                  ? 'Save changes'
+                  : 'Add Application'}
               </Button>
             </div>
           </form>
