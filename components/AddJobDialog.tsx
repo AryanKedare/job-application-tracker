@@ -80,16 +80,16 @@ export default function AddJobDialog({
     setResumeFile(file)
   }
 
-  const uploadResume = async (jobId: string): Promise<string | null> => {
+  const uploadResume = async (): Promise<string | null> => {
     if (!resumeFile) return null
     setUploadingResume(true)
-    const filePath = `${userId}/${jobId}/${resumeFile.name}`
+    const filePath = `${userId}/${resumeFile.name}`
     const { error } = await supabase.storage
       .from('resumes')
       .upload(filePath, resumeFile, { upsert: true })
     setUploadingResume(false)
     if (error) {
-      onError('Resume uploaded failed. The application was saved without it.')
+      onError('Resume upload failed. The application was saved without it.')
       return null
     }
     const { data } = supabase.storage.from('resumes').getPublicUrl(filePath)
@@ -115,7 +115,7 @@ export default function AddJobDialog({
         return
       }
 
-      if (resumeFile) await uploadResume(editJob.id)
+      if (resumeFile) await uploadResume()
       setSubmitting(false)
       onSuccess(data as JobApplication)
     } else {
@@ -131,7 +131,7 @@ export default function AddJobDialog({
         return
       }
 
-      if (resumeFile) await uploadResume(data.id)
+      if (resumeFile) await uploadResume()
       setSubmitting(false)
       onSuccess(data as JobApplication)
     }
@@ -229,7 +229,7 @@ export default function AddJobDialog({
               </div>
             </div>
 
-            {/* Notes — fixed height with internal scroll */}
+            {/* Notes - fixed height with internal scroll */}
             <div className="space-y-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea
@@ -276,7 +276,7 @@ export default function AddJobDialog({
               )}
             </div>
 
-            {/* Actions — sticky at bottom of scroll area */}
+            {/* Actions */}
             <div className="flex justify-end gap-3 pt-4 pb-2">
               <Button
                 type="button"
