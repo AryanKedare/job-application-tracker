@@ -74,7 +74,6 @@ export default function JobsTablePage() {
   }, [router])
 
   // ── Data fetching ─────────────────────────────────────────────────────────
-  // FIX: wrapped in useCallback so it can safely appear in dependency arrays
   const fetchJobs = useCallback(async () => {
     if (!userId) return
     setLoading(true)
@@ -82,7 +81,6 @@ export default function JobsTablePage() {
       const { data, error } = await supabase
         .from('job_applications')
         .select('id, job_title, company, job_link, status, date_applied, location, source, resume_url, notes, created_at, user_id')
-        // FIX: defence-in-depth — always filter by the authenticated user's id
         .eq('user_id', userId)
         .order('date_applied', { ascending: false })
 
@@ -102,13 +100,11 @@ export default function JobsTablePage() {
   // ── Status change ─────────────────────────────────────────────────────────
   const handleStatusChange = async (id: string, newStatus: JobApplication['status']) => {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, status: newStatus } : j)))
-
     const { error } = await supabase
       .from('job_applications')
       .update({ status: newStatus })
       .eq('id', id)
       .eq('user_id', userId)
-
     if (error) {
       showToast('Failed to update status.', 'error')
       fetchJobs()
@@ -120,15 +116,12 @@ export default function JobsTablePage() {
     const job = deleteDialog.job
     if (!job) return
     setDeleteDialog({ open: false, job: null })
-
     setJobs((prev) => prev.filter((j) => j.id !== job.id))
-
     const { error } = await supabase
       .from('job_applications')
       .delete()
       .eq('id', job.id)
       .eq('user_id', userId)
-
     if (error) {
       showToast('Failed to delete application.', 'error')
       fetchJobs()
@@ -283,19 +276,19 @@ export default function JobsTablePage() {
                               <Download className="w-3 h-3 mr-1" /> Resume
                             </a>
                           ) : (
-                            <span className="text-xs text-slate-500">Not uploaded</span>
+                            <span className="text-xs text-slate-500">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
                           {job.notes?.trim() ? (
                             <button
                               onClick={() => setNotesDialog({ open: true, notes: job.notes!, jobTitle: job.job_title, company: job.company })}
-                              className="inline-flex items-center rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300 border border-amber-500/40 hover:bg-amber-500/25"
+                              className="inline-flex items-center rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 whitespace-nowrap"
                             >
                               <StickyNote className="w-3 h-3 mr-1" /> View
                             </button>
                           ) : (
-                            <span className="text-xs text-slate-500">No notes</span>
+                            <span className="text-xs text-slate-500">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-slate-400 whitespace-nowrap text-xs">
@@ -361,17 +354,32 @@ export default function JobsTablePage() {
         onCancel={() => setDeleteDialog({ open: false, job: null })}
       />
 
-      {/* Notes dialog */}
+      {/* Notes dialog — properly boxed with scroll */}
       <Dialog open={notesDialog.open} onOpenChange={(v) => setNotesDialog((p) => ({ ...p, open: v }))}>
-        <DialogContent className="max-w-lg bg-slate-900 border border-slate-700 text-slate-100">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">
-              {notesDialog.jobTitle}{notesDialog.company ? ` — ${notesDialog.company}` : ''}
+        <DialogContent className="max-w-lg flex flex-col max-h-[70vh] bg-slate-900 border border-slate-700 text-slate-100 p-0">
+          <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-slate-800">
+            <DialogTitle className="text-base font-bold leading-snug">
+              {notesDialog.jobTitle}
+              {notesDialog.company && (
+                <span className="text-slate-400 font-normal"> — {notesDialog.company}</span>
+              )}
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">
-            {notesDialog.notes || 'No notes.'}
-          </p>
+          <div className="overflow-y-auto flex-1 min-h-0 px-6 py-4">
+            <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">
+              {notesDialog.notes || 'No notes.'}
+            </p>
+          </div>
+          <div className="flex-shrink-0 px-6 py-4 border-t border-slate-800">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-slate-700 text-slate-300 hover:bg-slate-800"
+              onClick={() => setNotesDialog((p) => ({ ...p, open: false }))}
+            >
+              Close
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
