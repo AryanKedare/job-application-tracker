@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { ArrowRight, FileText, Briefcase, TrendingUp, Trophy, XCircle, Ghost, Bookmark } from 'lucide-react'
+import { ArrowRight, FileText, Briefcase, TrendingUp, Trophy, XCircle, Ghost, Bookmark, LogOut } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { JobApplication } from '@/lib/types'
 
@@ -22,15 +23,25 @@ const STATUS_CONFIG: {
 ]
 
 export default function Home() {
+  const router = useRouter()
   const [stats, setStats] = useState<Partial<Record<JobApplication['status'], number>>>({})
   const [total, setTotal] = useState<number | null>(null)
   const [loggedIn, setLoggedIn] = useState(false)
+  const [userName, setUserName] = useState<string | null>(null)
 
   useEffect(() => {
-    const loadStats = async () => {
+    const loadData = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+
       setLoggedIn(true)
+      // Try full_name from metadata, fall back to email prefix
+      const name =
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        user.email?.split('@')[0] ||
+        null
+      setUserName(name)
 
       const { data } = await supabase
         .from('job_applications')
@@ -45,15 +56,53 @@ export default function Home() {
       }
       setStats(counts)
     }
-    loadStats()
+    loadData()
   }, [])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    setLoggedIn(false)
+    setUserName(null)
+    setTotal(null)
+    setStats({})
+    router.refresh()
+  }
 
   return (
     <div className="min-h-screen py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto text-center">
+      <div className="max-w-4xl mx-auto">
+
+        {/* Top bar */}
+        <div className="flex justify-end mb-6 min-h-[36px]">
+          {loggedIn ? (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-400">
+                Hi, <span className="text-slate-200 font-semibold">{userName}</span> 👋
+              </span>
+              <button
+                onClick={handleSignOut}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <Link href="/login">
+              <Button variant="outline" size="sm" className="border-slate-700 text-slate-300 hover:bg-slate-800">
+                Sign in
+              </Button>
+            </Link>
+          )}
+        </div>
 
         {/* Hero */}
-        <div className="mb-12">
+        <div className="mb-12 text-center">
+          {loggedIn && userName && (
+            <p className="text-slate-400 text-base mb-3">
+              Welcome back, <span className="text-slate-200 font-semibold">{userName}</span>!
+            </p>
+          )}
           <h1 className="text-5xl md:text-7xl font-black bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-400 bg-clip-text text-transparent mb-6">
             Job Tracker
           </h1>
@@ -68,8 +117,8 @@ export default function Home() {
           <Link href="/jobs" className="group">
             <div className="group-hover:bg-gradient-to-r group-hover:from-blue-600 group-hover:to-purple-600 bg-slate-900/70 rounded-3xl p-10 shadow-2xl border border-slate-800 hover:shadow-3xl transition-all duration-500 hover:-translate-y-2 h-full flex flex-col">
               <FileText className="w-16 h-16 mx-auto mb-6 text-blue-400 group-hover:text-white transition-colors" />
-              <h3 className="text-2xl font-bold mb-4 group-hover:text-white">View applications</h3>
-              <p className="text-lg text-slate-300 group-hover:text-slate-100 mb-8 flex-1">
+              <h3 className="text-2xl font-bold mb-4 group-hover:text-white text-center">View applications</h3>
+              <p className="text-lg text-slate-300 group-hover:text-slate-100 mb-8 flex-1 text-center">
                 See every application, status, and resume in one table.
               </p>
               <Button
@@ -112,10 +161,7 @@ export default function Home() {
                 {STATUS_CONFIG.map(({ key, label, icon, color, bg }) => {
                   const count = stats[key] ?? 0
                   return (
-                    <div
-                      key={key}
-                      className={`flex items-center gap-3 rounded-xl px-4 py-3 border ${bg}`}
-                    >
+                    <div key={key} className={`flex items-center gap-3 rounded-xl px-4 py-3 border ${bg}`}>
                       <span className={color}>{icon}</span>
                       <div>
                         <div className={`text-xl font-bold leading-none ${color}`}>{count}</div>
