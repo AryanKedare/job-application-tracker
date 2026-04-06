@@ -123,6 +123,17 @@ function CompanyAvatar({ name, jobLink }: { name: string; jobLink?: string }) {
 
 interface ToastState { message: string; type: 'success' | 'error' }
 
+/**
+ * Extract the Supabase Storage object path from a public URL.
+ * Public URLs look like:
+ *   https://<project>.supabase.co/storage/v1/object/public/resumes/<userId>/filename.pdf
+ * We need everything after "/object/public/resumes/" → "<userId>/filename.pdf"
+ */
+function extractStoragePath(resumeUrl: string): string | null {
+  const match = resumeUrl.match(/\/object\/public\/resumes\/(.+)$/)
+  return match ? match[1] : null
+}
+
 export default function JobsTablePage() {
   const router = useRouter()
   const [authChecked, setAuthChecked] = useState(false)
@@ -188,11 +199,38 @@ export default function JobsTablePage() {
   const handleDeleteConfirm = async () => {
     const job = deleteDialog.job
     if (!job) return
+
+    // Optimistically remove from UI right away
     setDeleteDialog({ open: false, job: null })
     setJobs((prev) => prev.filter((j) => j.id !== job.id))
-    const { error } = await supabase.from('job_applications').delete().eq('id', job.id).eq('user_id', userId)
-    if (error) { showToast('Failed to delete.', 'error'); fetchJobs() }
-    else showToast(`Deleted "${job.job_title}".`, 'success')
+
+    // ── 1. Delete the resume file from Storage (if one was uploaded) ──────────
+    if (job.resume_url) {
+      const storagePath = extractStoragePath(job.resume_url)
+      if (storagePath) {
+        const { error: storageError } = await supabase.storage
+          .from('resumes')
+          .remove([storagePath])
+        // Storage errors are non-fatal — log but still proceed to delete the DB row
+        if (storageError) {
+          console.error('Storage deletion error (non-fatal):', storageError)
+        }
+      }
+    }
+
+    // ── 2. Delete the database row ─────────────────────────────────────────────
+    const { error: dbError } = await supabase
+      .from('job_applications')
+      .delete()
+      .eq('id', job.id)
+      .eq('user_id', userId)   // RLS client-side double-check
+
+    if (dbError) {
+      showToast('Failed to delete application. Please try again.', 'error')
+      fetchJobs() // rollback optimistic UI
+    } else {
+      showToast(`Deleted "${job.job_title}".`, 'success')
+    }
   }
 
   const handleAddSuccess  = (j: JobApplication) => { setJobs((p) => [j, ...p]); showToast('Application added!', 'success') }
