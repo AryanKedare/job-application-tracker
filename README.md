@@ -2,7 +2,7 @@
 
 A full-stack job application tracker built with **Next.js 16**, **Supabase**, and **Tailwind CSS v4**. Track every application, its status, resume, and notes — all in one clean dashboard.
 
-**Live:** [job-application-tracker](https://github.com/AryanKedare/job-application-tracker) &nbsp;|&nbsp; **Source:** [github.com/AryanKedare/job-application-tracker](https://github.com/AryanKedare/job-application-tracker)
+**Live:** [job-application-tracker-iota-five.vercel.app](https://job-application-tracker-iota-five.vercel.app/) &nbsp;|&nbsp; **Source:** [github.com/AryanKedare/job-application-tracker](https://github.com/AryanKedare/job-application-tracker)
 
 ---
 
@@ -100,7 +100,7 @@ In your Supabase project → **Authentication → URL Configuration**, add:
 http://localhost:3000/auth/callback
 ```
 
-And for production add your Vercel URL (e.g. `https://your-app.vercel.app/auth/callback`).
+And for production add your Vercel URL (e.g. `https://job-application-tracker-iota-five.vercel.app/auth/callback`).
 
 ### 5. Run locally
 
