@@ -1,13 +1,11 @@
-// app/jobs/page.tsx
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
-  ArrowLeft, Download, ExternalLink, Plus, Pencil, Trash2,
-  StickyNote, Search, Filter, Briefcase, TrendingUp, Trophy,
-  Settings,
+  ArrowLeft, Briefcase, Download, ExternalLink, Filter, Pencil, Plus,
+  Search, Settings, StickyNote, Trash2, TrendingUp, Trophy,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -18,104 +16,56 @@ import AddJobDialog from '@/components/AddJobDialog'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog'
 import AccountSettingsDialog from '@/components/AccountSettingsDialog'
 import Toast from '@/components/Toast'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const STATUS_OPTIONS: JobApplication['status'][] = [
   'Bookmarked', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Ghosted',
 ]
 
 const STATUS_STYLE: Record<JobApplication['status'], { pill: string; dot: string }> = {
-  Bookmarked:   { pill: 'bg-slate-700/60 text-slate-300 border border-slate-600/50',        dot: 'bg-slate-400' },
-  Applied:      { pill: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',           dot: 'bg-blue-400' },
-  Interviewing: { pill: 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30',     dot: 'bg-yellow-400' },
-  Offer:        { pill: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',  dot: 'bg-emerald-400' },
-  Rejected:     { pill: 'bg-red-500/15 text-red-300 border border-red-500/30',              dot: 'bg-red-400' },
-  Ghosted:      { pill: 'bg-slate-600/30 text-slate-400 border border-slate-600/30',        dot: 'bg-slate-500' },
+  Bookmarked: { pill: 'bg-slate-700/60 text-slate-300 border border-slate-600/50', dot: 'bg-slate-400' },
+  Applied: { pill: 'bg-blue-500/15 text-blue-300 border border-blue-500/30', dot: 'bg-blue-400' },
+  Interviewing: { pill: 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30', dot: 'bg-yellow-400' },
+  Offer: { pill: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30', dot: 'bg-emerald-400' },
+  Rejected: { pill: 'bg-red-500/15 text-red-300 border border-red-500/30', dot: 'bg-red-400' },
+  Ghosted: { pill: 'bg-slate-600/30 text-slate-400 border border-slate-600/30', dot: 'bg-slate-500' },
 }
 
-/** Extract the bare hostname from a URL string */
-function extractDomain(url: string): string | null {
-  try {
-    const { hostname } = new URL(url.startsWith('http') ? url : `https://${url}`)
-    return hostname.replace(/^(www\d?|jobs?|careers?|apply|work|hire|talent|ie|uk|us)\./i, '')
-  } catch {
-    return null
-  }
-}
-
-function logoSources(domain: string): string[] {
-  return [
-    `https://logos.hunter.io/${domain}`,
-    `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-  ]
-}
-
-// Shared avatar shell — used by both logo and initials variants
-function AvatarShell({ children, colorClass }: { children: React.ReactNode; colorClass?: string }) {
+function AvatarShell({ children, colorClass = 'bg-white' }: { children: React.ReactNode; colorClass?: string }) {
   return (
-    <div
-      className={`
-        w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center
-        shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10
-        ${colorClass ?? 'bg-white'}
-      `}
-    >
+    <div className={`w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10 ${colorClass}`}>
       {children}
     </div>
   )
 }
 
 function InitialsAvatar({ name }: { name: string }) {
-  const initials = name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')
-  const palettes = [
-    { bg: 'bg-blue-600',   text: 'text-white' },
-    { bg: 'bg-violet-600', text: 'text-white' },
-    { bg: 'bg-emerald-600',text: 'text-white' },
-    { bg: 'bg-amber-500',  text: 'text-white' },
-    { bg: 'bg-rose-600',   text: 'text-white' },
-    { bg: 'bg-cyan-600',   text: 'text-white' },
-    { bg: 'bg-indigo-600', text: 'text-white' },
-    { bg: 'bg-teal-600',   text: 'text-white' },
-  ]
-  const { bg, text } = palettes[name.charCodeAt(0) % palettes.length]
-  return (
-    <AvatarShell colorClass={bg}>
-      <span className={`text-xs font-bold tracking-wide ${text}`}>{initials}</span>
-    </AvatarShell>
-  )
+  const safeName = name.trim() || '?'
+  const initials = safeName.split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('')
+  const palettes = ['bg-blue-600', 'bg-violet-600', 'bg-emerald-600', 'bg-amber-500', 'bg-rose-600', 'bg-cyan-600', 'bg-indigo-600', 'bg-teal-600']
+  const color = palettes[safeName.charCodeAt(0) % palettes.length]
+  return <AvatarShell colorClass={color}><span className="text-xs font-bold tracking-wide text-white">{initials}</span></AvatarShell>
 }
 
-function CompanyAvatar({ name, jobLink }: { name: string; jobLink?: string }) {
-  const domain = jobLink ? extractDomain(jobLink) : null
-  const sources = domain ? logoSources(domain) : []
-  const [srcIndex, setSrcIndex] = useState(0)
-  const [failed, setFailed]     = useState(false)
+function CompanyAvatar({ name }: { name: string }) {
+  const [failed, setFailed] = useState(false)
+  const company = name.trim()
 
-  useEffect(() => { setSrcIndex(0); setFailed(false) }, [domain])
+  useEffect(() => setFailed(false), [company])
 
-  if (!domain || failed || sources.length === 0) {
-    return <InitialsAvatar name={name} />
-  }
+  if (!company || failed) return <InitialsAvatar name={company || '?'} />
 
   return (
-    // White padded container — logos look clean regardless of their own background
-    <AvatarShell colorClass="bg-white">
+    <AvatarShell>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={sources[srcIndex]}
-        alt={`${name} logo`}
-        width={28}
-        height={28}
-        className="w-7 h-7 object-contain p-0.5"
-        onError={() => {
-          if (srcIndex + 1 < sources.length) setSrcIndex(srcIndex + 1)
-          else setFailed(true)
-        }}
+        src={`/api/company-logo?company=${encodeURIComponent(company)}`}
+        alt={`${company} logo`}
+        width={32}
+        height={32}
+        className="w-8 h-8 object-contain p-0.5"
+        loading="lazy"
+        onError={() => setFailed(true)}
       />
     </AvatarShell>
   )
@@ -123,12 +73,6 @@ function CompanyAvatar({ name, jobLink }: { name: string; jobLink?: string }) {
 
 interface ToastState { message: string; type: 'success' | 'error' }
 
-/**
- * Extract the Supabase Storage object path from a public URL.
- * Public URLs look like:
- *   https://<project>.supabase.co/storage/v1/object/public/resumes/<userId>/filename.pdf
- * We need everything after "/object/public/resumes/" → "<userId>/filename.pdf"
- */
 function extractStoragePath(resumeUrl: string): string | null {
   const match = resumeUrl.match(/\/object\/public\/resumes\/(.+)$/)
   return match ? match[1] : null
@@ -137,380 +81,156 @@ function extractStoragePath(resumeUrl: string): string | null {
 export default function JobsTablePage() {
   const router = useRouter()
   const [authChecked, setAuthChecked] = useState(false)
-  const [userId, setUserId]       = useState('')
+  const [userId, setUserId] = useState('')
   const [userEmail, setUserEmail] = useState('')
-  const [userName, setUserName]   = useState<string | null>(null)
-  const [jobs, setJobs]           = useState<JobApplication[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [toast, setToast]         = useState<ToastState | null>(null)
-  const [search, setSearch]       = useState('')
+  const [userName, setUserName] = useState<string | null>(null)
+  const [jobs, setJobs] = useState<JobApplication[]>([])
+  const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState<ToastState | null>(null)
+  const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<JobApplication['status'] | 'All'>('All')
-
-  const [addOpen,      setAddOpen]      = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [editDialog,   setEditDialog]   = useState<{ open: boolean; job: JobApplication | null }>({ open: false, job: null })
+  const [editDialog, setEditDialog] = useState<{ open: boolean; job: JobApplication | null }>({ open: false, job: null })
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; job: JobApplication | null }>({ open: false, job: null })
-  const [notesDialog,  setNotesDialog]  = useState<{ open: boolean; notes: string; jobTitle: string; company: string }>({
-    open: false, notes: '', jobTitle: '', company: '',
-  })
+  const [notesDialog, setNotesDialog] = useState({ open: false, notes: '', jobTitle: '', company: '' })
 
-  const showToast = (message: string, type: 'success' | 'error') => setToast({ message, type })
+  const showToast = (message: string, type: ToastState['type']) => setToast({ message, type })
 
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.replace('/login') }
-      else {
-        setUserId(user.id)
-        setUserEmail(user.email ?? '')
-        setUserName(user.user_metadata?.full_name || user.user_metadata?.name || null)
-        setAuthChecked(true)
+      if (!user) {
+        router.replace('/login')
+        return
       }
+      setUserId(user.id)
+      setUserEmail(user.email ?? '')
+      setUserName(user.user_metadata?.full_name || user.user_metadata?.name || null)
+      setAuthChecked(true)
     }
-    checkAuth()
+    void checkAuth()
   }, [router])
 
   const fetchJobs = useCallback(async () => {
     if (!userId) return
     setLoading(true)
-    try {
-      const { data, error } = await supabase
-        .from('job_applications')
-        .select('id, job_title, company, job_link, status, date_applied, location, source, resume_url, notes, created_at, user_id')
-        .eq('user_id', userId)
-        .order('date_applied', { ascending: false })
-      if (error) throw error
-      setJobs(data || [])
-    } catch {
-      showToast('Failed to load applications. Please refresh.', 'error')
-    } finally {
-      setLoading(false)
-    }
+    const { data, error } = await supabase
+      .from('job_applications')
+      .select('id, job_title, company, job_link, status, date_applied, location, source, resume_url, notes, created_at, user_id')
+      .eq('user_id', userId)
+      .order('date_applied', { ascending: false })
+    if (error) showToast('Failed to load applications. Please refresh.', 'error')
+    else setJobs((data ?? []) as JobApplication[])
+    setLoading(false)
   }, [userId])
 
-  useEffect(() => { if (authChecked) fetchJobs() }, [authChecked, fetchJobs])
+  useEffect(() => { if (authChecked) void fetchJobs() }, [authChecked, fetchJobs])
 
   const handleStatusChange = async (id: string, newStatus: JobApplication['status']) => {
-    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, status: newStatus } : j)))
+    setJobs((current) => current.map((job) => job.id === id ? { ...job, status: newStatus } : job))
     const { error } = await supabase.from('job_applications').update({ status: newStatus }).eq('id', id).eq('user_id', userId)
-    if (error) { showToast('Failed to update status.', 'error'); fetchJobs() }
+    if (error) {
+      showToast('Failed to update status.', 'error')
+      void fetchJobs()
+    }
   }
 
   const handleDeleteConfirm = async () => {
     const job = deleteDialog.job
     if (!job) return
-
-    // Optimistically remove from UI right away
     setDeleteDialog({ open: false, job: null })
-    setJobs((prev) => prev.filter((j) => j.id !== job.id))
+    setJobs((current) => current.filter((item) => item.id !== job.id))
 
-    // ── 1. Delete the resume file from Storage (if one was uploaded) ──────────
-    if (job.resume_url) {
-      const storagePath = extractStoragePath(job.resume_url)
-      if (storagePath) {
-        const { error: storageError } = await supabase.storage
-          .from('resumes')
-          .remove([storagePath])
-        // Storage errors are non-fatal — log but still proceed to delete the DB row
-        if (storageError) {
-          console.error('Storage deletion error (non-fatal):', storageError)
-        }
-      }
-    }
-
-    // ── 2. Delete the database row ─────────────────────────────────────────────
-    const { error: dbError } = await supabase
-      .from('job_applications')
-      .delete()
-      .eq('id', job.id)
-      .eq('user_id', userId)   // RLS client-side double-check
-
+    const { error: dbError } = await supabase.from('job_applications').delete().eq('id', job.id).eq('user_id', userId)
     if (dbError) {
-      showToast('Failed to delete application. Please try again.', 'error')
-      fetchJobs() // rollback optimistic UI
-    } else {
-      showToast(`Deleted "${job.job_title}".`, 'success')
+      showToast('Failed to delete application.', 'error')
+      void fetchJobs()
+      return
     }
+
+    if (job.resume_url) {
+      const path = extractStoragePath(job.resume_url)
+      if (path) await supabase.storage.from('resumes').remove([path])
+    }
+    showToast(`Deleted "${job.job_title}".`, 'success')
   }
 
-  const handleAddSuccess  = (j: JobApplication) => { setJobs((p) => [j, ...p]); showToast('Application added!', 'success') }
-  const handleEditSuccess = (j: JobApplication) => { setJobs((p) => p.map((x) => (x.id === j.id ? j : x))); showToast('Updated!', 'success'); setEditDialog({ open: false, job: null }) }
-  const handleSignOut     = async () => { await supabase.auth.signOut(); router.replace('/login') }
-  const handleDataDeleted = () => { setJobs([]); showToast('All data deleted.', 'success') }
-
-  const statsCount = useMemo(() => ({
-    applied:      jobs.filter((j) => j.status === 'Applied').length,
-    interviewing: jobs.filter((j) => j.status === 'Interviewing').length,
-    offer:        jobs.filter((j) => j.status === 'Offer').length,
+  const stats = useMemo(() => ({
+    applied: jobs.filter((job) => job.status === 'Applied').length,
+    interviewing: jobs.filter((job) => job.status === 'Interviewing').length,
+    offer: jobs.filter((job) => job.status === 'Offer').length,
   }), [jobs])
 
-  const filteredJobs = useMemo(() => jobs.filter((j) => {
-    const q = search.toLowerCase()
-    const matchSearch = q === '' || j.job_title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q) || (j.location ?? '').toLowerCase().includes(q)
-    const matchStatus = statusFilter === 'All' || j.status === statusFilter
-    return matchSearch && matchStatus
+  const filteredJobs = useMemo(() => jobs.filter((job) => {
+    const query = search.toLowerCase()
+    const matchesSearch = !query || job.job_title.toLowerCase().includes(query) || (job.company ?? '').toLowerCase().includes(query) || (job.location ?? '').toLowerCase().includes(query)
+    return matchesSearch && (statusFilter === 'All' || job.status === statusFilter)
   }), [jobs, search, statusFilter])
 
   if (!authChecked || loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-400 text-sm">Loading applications…</p>
-        </div>
-      </div>
-    )
+    return <div className="min-h-screen flex items-center justify-center bg-slate-950"><div className="h-8 w-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>
   }
 
   return (
     <>
       <div className="min-h-screen bg-slate-950 text-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8 space-y-6">
-
-          {/* Header */}
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="flex items-center gap-3">
-              <Link href="/">
-                <Button variant="outline" size="icon" className="rounded-full border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 flex-shrink-0">
-                  <ArrowLeft className="w-4 h-4" />
-                </Button>
-              </Link>
-              <div>
-                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Applications</h1>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  {jobs.length} tracked &bull; {filteredJobs.length} shown
-                </p>
-              </div>
+              <Link href="/"><Button variant="outline" size="icon" className="rounded-full border-slate-700 bg-slate-900"><ArrowLeft className="w-4 h-4" /></Button></Link>
+              <div><h1 className="text-3xl md:text-4xl font-bold">Applications</h1><p className="text-sm text-slate-500">{jobs.length} tracked &bull; {filteredJobs.length} shown</p></div>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Button onClick={() => setAddOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold rounded-xl px-5 h-10">
-                <Plus className="w-4 h-4 mr-2" /> Add application
-              </Button>
-              <Button
-                variant="outline" size="icon"
-                className="border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100 h-10 w-10"
-                onClick={() => setSettingsOpen(true)}
-                title="Account settings"
-              >
-                <Settings className="w-4 h-4" />
-              </Button>
-              <Button variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800 h-10" onClick={handleSignOut}>
-                Sign out
-              </Button>
+              <Button onClick={() => setAddOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold"><Plus className="w-4 h-4 mr-2" />Add application</Button>
+              <Button variant="outline" size="icon" className="border-slate-700" onClick={() => setSettingsOpen(true)}><Settings className="w-4 h-4" /></Button>
+              <Button variant="outline" className="border-slate-700" onClick={async () => { await supabase.auth.signOut(); router.replace('/login') }}>Sign out</Button>
             </div>
           </div>
 
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl px-4 py-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-                <Briefcase className="w-4 h-4 text-blue-400" />
-              </div>
-              <div>
-                <div className="text-xl font-bold text-blue-300 leading-none">{statsCount.applied}</div>
-                <div className="text-xs text-slate-400 mt-0.5">Applied</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl px-4 py-3">
-              <div className="w-8 h-8 rounded-lg bg-yellow-500/20 flex items-center justify-center flex-shrink-0">
-                <TrendingUp className="w-4 h-4 text-yellow-400" />
-              </div>
-              <div>
-                <div className="text-xl font-bold text-yellow-300 leading-none">{statsCount.interviewing}</div>
-                <div className="text-xs text-slate-400 mt-0.5">Interviewing</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl px-4 py-3">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
-                <Trophy className="w-4 h-4 text-emerald-400" />
-              </div>
-              <div>
-                <div className="text-xl font-bold text-emerald-300 leading-none">{statsCount.offer}</div>
-                <div className="text-xs text-slate-400 mt-0.5">Offers</div>
-              </div>
-            </div>
+            {[
+              ['Applied', stats.applied, Briefcase, 'blue'],
+              ['Interviewing', stats.interviewing, TrendingUp, 'yellow'],
+              ['Offers', stats.offer, Trophy, 'emerald'],
+            ].map(([label, count, Icon, color]) => {
+              const StatusIcon = Icon as typeof Briefcase
+              return <div key={String(label)} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3"><StatusIcon className={`w-4 h-4 text-${color}-400`} /><div><div className="text-xl font-bold">{String(count)}</div><div className="text-xs text-slate-400">{String(label)}</div></div></div>
+            })}
           </div>
 
-          {/* Search + Filter */}
           <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-              <Input
-                placeholder="Search by role, company, or location…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500 h-10"
-              />
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Filter className="w-4 h-4 text-slate-500" />
-              <div className="flex gap-1.5 flex-wrap">
-                {(['All', ...STATUS_OPTIONS] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s as JobApplication['status'] | 'All')}
-                    className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                      statusFilter === s
-                        ? 'bg-slate-100 text-slate-900 border-slate-100'
-                        : 'bg-slate-900 text-slate-400 border-slate-700 hover:border-slate-500 hover:text-slate-200'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by role, company, or location…" className="pl-9 bg-slate-900 border-slate-700" /></div>
+            <div className="flex items-center gap-2"><Filter className="w-4 h-4 text-slate-500" /><div className="flex gap-1.5 flex-wrap">{(['All', ...STATUS_OPTIONS] as const).map((status) => <button key={status} onClick={() => setStatusFilter(status)} className={`text-xs px-3 py-1.5 rounded-full border ${statusFilter === status ? 'bg-slate-100 text-slate-900 border-slate-100' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>{status}</button>)}</div></div>
           </div>
 
-          {/* Empty states */}
-          {jobs.length === 0 && (
-            <div className="flex flex-col items-center justify-center text-center py-24 rounded-2xl border border-dashed border-slate-700 bg-slate-900/40">
-              <StickyNote className="w-12 h-12 text-slate-600 mb-4" />
-              <h3 className="text-lg font-semibold text-slate-300 mb-2">No applications yet</h3>
-              <p className="text-slate-500 text-sm max-w-xs mb-6">Start tracking your job search — add your first application.</p>
-              <Button onClick={() => setAddOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold">
-                <Plus className="w-4 h-4 mr-2" /> Add first application
-              </Button>
-            </div>
-          )}
-          {jobs.length > 0 && filteredJobs.length === 0 && (
-            <div className="flex flex-col items-center justify-center text-center py-16 rounded-2xl border border-dashed border-slate-700 bg-slate-900/40">
-              <Search className="w-10 h-10 text-slate-600 mb-3" />
-              <h3 className="text-base font-semibold text-slate-300 mb-1">No results found</h3>
-              <p className="text-slate-500 text-sm">Try adjusting your search or filter.</p>
-            </div>
-          )}
-
-          {/* Table */}
-          {filteredJobs.length > 0 && (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 shadow-2xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-800 bg-slate-900/80 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      <th className="px-5 py-3.5">Company</th>
-                      <th className="px-5 py-3.5">Role</th>
-                      <th className="px-5 py-3.5">Location</th>
-                      <th className="px-5 py-3.5">Status</th>
-                      <th className="px-5 py-3.5">Apply</th>
-                      <th className="px-5 py-3.5">Resume</th>
-                      <th className="px-5 py-3.5">Notes</th>
-                      <th className="px-5 py-3.5">Date</th>
-                      <th className="px-5 py-3.5"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/70">
-                    {filteredJobs.map((job) => (
-                      <tr key={job.id} className="group hover:bg-slate-800/40 transition-colors">
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-3 min-w-[150px]">
-                            <CompanyAvatar name={job.company || job.job_title} jobLink={job.job_link} />
-                            <span className="font-medium text-slate-100 truncate max-w-[120px] leading-tight">{job.company || '—'}</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 max-w-[240px]">
-                          <span className="font-semibold text-slate-50 truncate block">{job.job_title}</span>
-                        </td>
-                        <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap text-xs">{job.location || '—'}</td>
-                        <td className="px-5 py-3.5">
-                          <div className="relative inline-block">
-                            <select
-                              value={job.status}
-                              onChange={(e) => handleStatusChange(job.id, e.target.value as JobApplication['status'])}
-                              className={`appearance-none cursor-pointer text-xs font-semibold rounded-full pl-5 pr-3 py-1 outline-none transition-colors ${STATUS_STYLE[job.status].pill}`}
-                              aria-label={`Status for ${job.job_title}`}
-                            >
-                              {STATUS_OPTIONS.map((s) => (
-                                <option key={s} value={s} className="bg-slate-900 text-slate-100">{s}</option>
-                              ))}
-                            </select>
-                            <span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full pointer-events-none ${STATUS_STYLE[job.status].dot}`} />
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          {job.job_link ? (
-                            <a href={job.job_link} target="_blank" rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors">
-                              Link <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : <span className="text-xs text-slate-600">—</span>}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          {job.resume_url ? (
-                            <a href={job.resume_url} target="_blank" rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-full px-2.5 py-1 transition-colors">
-                              <Download className="w-3 h-3" /> CV
-                            </a>
-                          ) : <span className="text-xs text-slate-600">—</span>}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          {job.notes?.trim() ? (
-                            <button
-                              onClick={() => setNotesDialog({ open: true, notes: job.notes!, jobTitle: job.job_title, company: job.company })}
-                              className="inline-flex items-center gap-1 text-xs font-medium text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-full px-2.5 py-1 transition-colors">
-                              <StickyNote className="w-3 h-3" /> View
-                            </button>
-                          ) : <span className="text-xs text-slate-600">—</span>}
-                        </td>
-                        <td className="px-5 py-3.5 text-slate-500 whitespace-nowrap text-xs">
-                          {job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setEditDialog({ open: true, job })}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-100 hover:bg-slate-700 transition-colors"
-                              aria-label={`Edit ${job.job_title}`}>
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => setDeleteDialog({ open: true, job })}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                              aria-label={`Delete ${job.job_title}`}>
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          {filteredJobs.length === 0 ? (
+            <div className="text-center py-20 rounded-2xl border border-dashed border-slate-700 text-slate-400">{jobs.length ? 'No results found.' : 'No applications yet.'}</div>
+          ) : (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-800 text-left text-xs text-slate-500 uppercase"><th className="px-5 py-3.5">Company</th><th className="px-5 py-3.5">Role</th><th className="px-5 py-3.5">Location</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Apply</th><th className="px-5 py-3.5">Resume</th><th className="px-5 py-3.5">Notes</th><th className="px-5 py-3.5">Date</th><th /></tr></thead>
+              <tbody className="divide-y divide-slate-800/70">{filteredJobs.map((job) => <tr key={job.id} className="group hover:bg-slate-800/40">
+                <td className="px-5 py-3.5"><div className="flex items-center gap-3 min-w-[150px]"><CompanyAvatar name={job.company || job.job_title} /><span className="font-medium truncate max-w-[140px]">{job.company || '—'}</span></div></td>
+                <td className="px-5 py-3.5 font-semibold max-w-[240px]">{job.job_title}</td>
+                <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap">{job.location || '—'}</td>
+                <td className="px-5 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} className={`appearance-none text-xs font-semibold rounded-full pl-5 pr-3 py-1 ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td>
+                <td className="px-5 py-3.5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400">Link<ExternalLink className="w-3 h-3" /></a> : '—'}</td>
+                <td className="px-5 py-3.5">{job.resume_url ? <a href={job.resume_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1"><Download className="w-3 h-3" />CV</a> : '—'}</td>
+                <td className="px-5 py-3.5">{job.notes?.trim() ? <button onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 text-amber-400"><StickyNote className="w-3 h-3" />View</button> : '—'}</td>
+                <td className="px-5 py-3.5 text-slate-500 whitespace-nowrap">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td>
+                <td className="px-5 py-3.5"><div className="flex gap-1 opacity-0 group-hover:opacity-100"><button onClick={() => setEditDialog({ open: true, job })} className="p-1.5"><Pencil className="w-3.5 h-3.5" /></button><button onClick={() => setDeleteDialog({ open: true, job })} className="p-1.5 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button></div></td>
+              </tr>)}</tbody>
+            </table></div></div>
           )}
         </div>
       </div>
 
-      <AddJobDialog open={addOpen} setOpen={setAddOpen} onSuccess={handleAddSuccess} onError={(msg) => showToast(msg, 'error')} userId={userId} />
-      {editDialog.job && (
-        <AddJobDialog open={editDialog.open} setOpen={(v) => setEditDialog({ open: v, job: editDialog.job })} onSuccess={handleEditSuccess} onError={(msg) => showToast(msg, 'error')} userId={userId} editJob={editDialog.job} />
-      )}
-      <DeleteConfirmDialog open={deleteDialog.open} jobTitle={deleteDialog.job?.job_title ?? ''} company={deleteDialog.job?.company ?? ''} onConfirm={handleDeleteConfirm} onCancel={() => setDeleteDialog({ open: false, job: null })} />
+      <AddJobDialog open={addOpen} setOpen={setAddOpen} userId={userId} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => [job, ...current]); showToast('Application added!', 'success') }} />
+      {editDialog.job && <AddJobDialog open={editDialog.open} setOpen={(open) => setEditDialog({ open, job: editDialog.job })} userId={userId} editJob={editDialog.job} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => current.map((item) => item.id === job.id ? job : item)); setEditDialog({ open: false, job: null }); showToast('Updated!', 'success') }} />}
+      <DeleteConfirmDialog open={deleteDialog.open} jobTitle={deleteDialog.job?.job_title ?? ''} company={deleteDialog.job?.company ?? ''} onConfirm={() => void handleDeleteConfirm()} onCancel={() => setDeleteDialog({ open: false, job: null })} />
+      <AccountSettingsDialog open={settingsOpen} setOpen={setSettingsOpen} jobs={jobs} userId={userId} userEmail={userEmail} userName={userName} onDataDeleted={() => { setJobs([]); showToast('All data deleted.', 'success') }} />
 
-      <AccountSettingsDialog
-        open={settingsOpen} setOpen={setSettingsOpen}
-        jobs={jobs} userId={userId} userEmail={userEmail} userName={userName}
-        onDataDeleted={handleDataDeleted}
-      />
-
-      <Dialog open={notesDialog.open} onOpenChange={(v) => setNotesDialog((p) => ({ ...p, open: v }))}>
-        <DialogContent className="max-w-lg flex flex-col max-h-[70vh] bg-slate-900 border border-slate-700 text-slate-100 p-0">
-          <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-slate-800">
-            <DialogTitle className="text-base font-bold leading-snug">
-              {notesDialog.jobTitle}
-              {notesDialog.company && <span className="text-slate-400 font-normal"> — {notesDialog.company}</span>}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="overflow-y-auto flex-1 min-h-0 px-6 py-4">
-            <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{notesDialog.notes || 'No notes.'}</p>
-          </div>
-          <div className="flex-shrink-0 px-6 py-4 border-t border-slate-800">
-            <Button variant="outline" size="sm" className="border-slate-700 text-slate-300 hover:bg-slate-800"
-              onClick={() => setNotesDialog((p) => ({ ...p, open: false }))}>
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
+      <Dialog open={notesDialog.open} onOpenChange={(open) => setNotesDialog((current) => ({ ...current, open }))}><DialogContent className="max-w-lg bg-slate-900 border-slate-700 text-slate-100"><DialogHeader><DialogTitle>{notesDialog.jobTitle}{notesDialog.company && ` — ${notesDialog.company}`}</DialogTitle></DialogHeader><p className="text-sm text-slate-300 whitespace-pre-wrap">{notesDialog.notes}</p></DialogContent></Dialog>
       {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
     </>
   )
