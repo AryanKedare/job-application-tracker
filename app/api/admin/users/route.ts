@@ -28,10 +28,7 @@ async function jobCountsByUser(): Promise<Map<string, number>> {
   const supabase = getAdminSupabase()
   const counts = new Map<string, number>()
   for (let from = 0; from < 100_000; from += 1000) {
-    const { data, error } = await supabase
-      .from('job_applications')
-      .select('user_id')
-      .range(from, from + 999)
+    const { data, error } = await supabase.from('job_applications').select('user_id').range(from, from + 999)
     if (error) throw error
     for (const row of data ?? []) {
       if (typeof row.user_id === 'string') counts.set(row.user_id, (counts.get(row.user_id) ?? 0) + 1)
@@ -54,6 +51,10 @@ async function deleteResumeFolder(userId: string) {
     }
     if (data.length < 100) break
   }
+}
+
+function validEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
 export async function GET(request: NextRequest) {
@@ -97,7 +98,7 @@ export async function PATCH(request: NextRequest) {
   const userId = typeof body?.userId === 'string' ? body.userId : ''
   const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 100) : ''
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase().slice(0, 254) : ''
-  if (!userId || !email || !email.includes('@')) return NextResponse.json({ error: 'Valid user details are required.' }, { status: 400 })
+  if (!userId || !validEmail(email)) return NextResponse.json({ error: 'Valid user details are required.' }, { status: 400 })
 
   try {
     const supabase = getAdminSupabase()
@@ -119,24 +120,61 @@ export async function POST(request: NextRequest) {
   const originError = rejectCrossOrigin(request)
   if (originError) return originError
 
-  const body = await request.json().catch(() => null) as { action?: unknown; email?: unknown } | null
+  const body = await request.json().catch(() => null) as { action?: unknown; email?: unknown; name?: unknown } | null
   const action = body?.action
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase().slice(0, 254) : ''
-  if ((action !== 'recovery' && action !== 'magic-link') || !email) {
-    return NextResponse.json({ error: 'A valid action and email are required.' }, { status: 400 })
-  }
+  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 100) : ''
+  if (!validEmail(email)) return NextResponse.json({ error: 'A valid email address is required.' }, { status: 400 })
 
   try {
     const supabase = getAdminSupabase()
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin
-    const result = action === 'recovery'
-      ? await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${siteUrl}/auth/callback?next=/reset-password` })
-      : await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: `${siteUrl}/auth/callback`, shouldCreateUser: false } })
-    if (result.error) throw result.error
-    return NextResponse.json({ ok: true })
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin).replace(/\/$/, '')
+
+    if (action === 'invite') {
+      if (!name) return NextResponse.json({ error: 'The user name is required.' }, { status: 400 })
+
+      const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+        data: { full_name: name, name, invited_by_admin: true },
+      })
+      if (inviteError) throw inviteError
+
+      const { error: magicError } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${siteUrl}/auth/callback`,
+          shouldCreateUser: false,
+        },
+      })
+      if (magicError) console.error('Invitation created, but magic-link email failed:', magicError)
+
+      return NextResponse.json({ ok: true, magicLinkSent: !magicError })
+    }
+
+    if (action === 'recovery') {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+      })
+      if (error) throw error
+      return NextResponse.json({ ok: true })
+    }
+
+    if (action === 'magic-link') {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${siteUrl}/auth/callback`, shouldCreateUser: false },
+      })
+      if (error) throw error
+      return NextResponse.json({ ok: true })
+    }
+
+    return NextResponse.json({ error: 'A valid action is required.' }, { status: 400 })
   } catch (error) {
     console.error('Admin email action failed:', error)
-    return NextResponse.json({ error: 'Could not send the email.' }, { status: 500 })
+    const message = error instanceof Error && /already|registered|exists/i.test(error.message)
+      ? 'A user with this email already exists.'
+      : 'Could not complete this email action.'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
