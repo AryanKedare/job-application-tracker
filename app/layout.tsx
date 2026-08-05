@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { cn } from '@/lib/utils'
 import { SupabaseProvider } from '@/lib/supabaseProvider'
+import AuthRecoveryRedirect from '@/components/AuthRecoveryRedirect'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -25,7 +26,10 @@ export default function RootLayout({
           inter.className
         )}
       >
-        <SupabaseProvider>{children}</SupabaseProvider>
+        <SupabaseProvider>
+          <AuthRecoveryRedirect />
+          {children}
+        </SupabaseProvider>
       </body>
     </html>
   )
