@@ -1,80 +1,128 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Mail, CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, KeyRound, Mail } from 'lucide-react'
 
 type Mode = 'signin' | 'signup'
-
-// Simple client-side rate limiter — prevents spamming the magic link endpoint.
-// Allows 3 requests per 60-second window.
-const RATE_LIMIT_MAX  = 3
-const RATE_LIMIT_WINDOW_MS = 60_000
+type Method = 'password' | 'magic-link'
 
 export default function LoginPage() {
-  const [mode, setMode]     = useState<Mode>('signin')
-  const [email, setEmail]   = useState('')
-  const [name, setName]     = useState('')
+  const [mode, setMode] = useState<Mode>('signin')
+  const [method, setMethod] = useState<Method>('password')
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [sent, setSent]     = useState(false)
-  const [error, setError]   = useState<string | null>(null)
+  const [sent, setSent] = useState(false)
+  const [sentMessage, setSentMessage] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
-  // Rate-limiting state (in-memory, resets on page reload)
-  const attempts   = useRef<number[]>([])
-  const [rateLimited, setRateLimited] = useState(false)
-
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ??
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ??
     (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000')
 
-  const checkRateLimit = (): boolean => {
-    const now = Date.now()
-    // Drop attempts older than the window
-    attempts.current = attempts.current.filter((t) => now - t < RATE_LIMIT_WINDOW_MS)
-    if (attempts.current.length >= RATE_LIMIT_MAX) {
-      setRateLimited(true)
-      setError(`Too many requests. Please wait a minute before trying again.`)
-      return false
-    }
-    attempts.current.push(now)
-    return true
+  const resetFeedback = () => {
+    setError(null)
+    setSent(false)
+    setSentMessage('')
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
+  const handleForgotPassword = async () => {
+    resetFeedback()
+    const normalizedEmail = email.trim().toLowerCase()
 
-    if (!checkRateLimit()) return
+    if (!normalizedEmail) {
+      setError('Enter your email address first.')
+      return
+    }
 
-    if (mode === 'signup' && !name.trim()) {
+    setLoading(true)
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: `${baseUrl}/auth/callback?next=/reset-password`,
+      })
+      if (resetError) throw resetError
+
+      setSentMessage('If an account exists for this email, a password reset link has been sent.')
+      setSent(true)
+    } catch {
+      setError('Could not send the reset email. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    resetFeedback()
+
+    const normalizedEmail = email.trim().toLowerCase()
+    const trimmedName = name.trim()
+
+    if (mode === 'signup' && !trimmedName) {
       setError('Please enter your name.')
       return
     }
 
-    // Trim name to prevent leading/trailing whitespace being stored
-    const trimmedName = name.trim()
+    if (method === 'password') {
+      if (password.length < 12) {
+        setError('Use a password with at least 12 characters.')
+        return
+      }
+      if (mode === 'signup' && password !== confirmPassword) {
+        setError('Passwords do not match.')
+        return
+      }
+    }
 
     setLoading(true)
+    try {
+      if (method === 'magic-link') {
+        const { error: authError } = await supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: {
+            emailRedirectTo: `${baseUrl}/auth/callback`,
+            data: mode === 'signup' ? { full_name: trimmedName } : undefined,
+            shouldCreateUser: mode === 'signup',
+          },
+        })
+        if (authError) throw authError
+        setSentMessage('We sent a secure sign-in link to your email.')
+        setSent(true)
+        return
+      }
 
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-      options: {
-        emailRedirectTo: `${baseUrl}/auth/callback`,
-        data: mode === 'signup' ? { full_name: trimmedName } : undefined,
-      },
-    })
-
-    setLoading(false)
-
-    if (otpError) {
-      // Don't leak internal error details to the UI
-      setError('Failed to send magic link. Please check your email address and try again.')
-    } else {
-      setRateLimited(false)
-      setSent(true)
+      if (mode === 'signup') {
+        const { data, error: authError } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            emailRedirectTo: `${baseUrl}/auth/callback`,
+            data: { full_name: trimmedName },
+          },
+        })
+        if (authError) throw authError
+        if (data.session) window.location.assign('/jobs')
+        else {
+          setSentMessage('We sent an account confirmation link to your email.')
+          setSent(true)
+        }
+      } else {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        })
+        if (authError) throw authError
+        window.location.assign('/jobs')
+      }
+    } catch {
+      setError('Authentication failed. Check your details and try again.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -85,15 +133,14 @@ export default function LoginPage() {
           <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
           <h2 className="text-2xl font-bold">Check your email</h2>
           <p className="text-slate-400 text-sm">
-            We sent a magic link to{' '}
-            <span className="text-slate-200 font-medium">{email}</span>.
-            Click it to {mode === 'signup' ? 'create your account' : 'sign in'}.
+            {sentMessage} <span className="text-slate-200 font-medium">{email}</span>
           </p>
           <button
-            onClick={() => { setSent(false); setEmail(''); setName('') }}
-            className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 mt-2"
+            type="button"
+            onClick={() => setSent(false)}
+            className="text-xs text-slate-400 hover:text-white underline"
           >
-            Use a different email
+            Back to sign in
           </button>
         </div>
       </div>
@@ -103,63 +150,55 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-4">
       <div className="w-full max-w-md">
-
-        {/* Logo / title */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-600 mb-4">
-            <Mail className="w-6 h-6 text-white" />
+            {method === 'password' ? <KeyRound className="w-6 h-6" /> : <Mail className="w-6 h-6" />}
           </div>
-          <h1 className="text-3xl font-black bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-            Job Tracker
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            {mode === 'signup' ? 'Create your account' : 'Welcome back'}
-          </p>
+          <h1 className="text-3xl font-black bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Job Tracker</h1>
+          <p className="text-slate-400 text-sm mt-1">{mode === 'signup' ? 'Create your account' : 'Welcome back'}</p>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-5 bg-slate-900/70 rounded-2xl border border-slate-800 p-8"
-        >
-          {/* Mode toggle */}
-          <div className="flex rounded-xl overflow-hidden border border-slate-700 text-sm font-medium">
+        <form onSubmit={handleSubmit} className="space-y-5 bg-slate-900/70 rounded-2xl border border-slate-800 p-8">
+          <div className="grid grid-cols-2 rounded-xl overflow-hidden border border-slate-700 text-sm font-medium">
+            {(['signin', 'signup'] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => { setMode(item); resetFeedback() }}
+                className={`py-2 ${mode === item ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}`}
+              >
+                {item === 'signin' ? 'Sign in' : 'Sign up'}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-950/60 p-1">
             <button
               type="button"
-              onClick={() => { setMode('signin'); setError(null) }}
-              className={`flex-1 py-2 transition-colors ${
-                mode === 'signin'
-                  ? 'bg-slate-700 text-slate-100'
-                  : 'bg-slate-900 text-slate-400 hover:text-slate-200'
-              }`}
+              onClick={() => { setMethod('password'); resetFeedback() }}
+              className={`rounded-lg py-2 text-xs font-semibold ${method === 'password' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
             >
-              Sign in
+              Password
             </button>
             <button
               type="button"
-              onClick={() => { setMode('signup'); setError(null) }}
-              className={`flex-1 py-2 transition-colors ${
-                mode === 'signup'
-                  ? 'bg-slate-700 text-slate-100'
-                  : 'bg-slate-900 text-slate-400 hover:text-slate-200'
-              }`}
+              onClick={() => { setMethod('magic-link'); resetFeedback() }}
+              className={`rounded-lg py-2 text-xs font-semibold ${method === 'magic-link' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
             >
-              Sign up
+              Magic link
             </button>
           </div>
 
-          {/* Name field — sign up only */}
           {mode === 'signup' && (
             <div className="space-y-2">
               <Label htmlFor="name">Your name</Label>
               <Input
                 id="name"
-                type="text"
-                placeholder="e.g. Aryan Kedare"
                 required
                 maxLength={80}
                 autoComplete="name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(event) => setName(event.target.value)}
                 className="bg-slate-800 border-slate-700"
               />
             </div>
@@ -170,15 +209,59 @@ export default function LoginPage() {
             <Input
               id="email"
               type="email"
-              placeholder="you@example.com"
               required
               maxLength={254}
               autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
               className="bg-slate-800 border-slate-700"
             />
           </div>
+
+          {method === 'password' && (
+            <>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="password">Password</Label>
+                  {mode === 'signin' && (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      disabled={loading}
+                      className="text-xs font-medium text-blue-400 hover:text-blue-300 disabled:opacity-50"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  minLength={12}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="bg-slate-800 border-slate-700"
+                />
+              </div>
+              {mode === 'signup' && (
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-password">Confirm password</Label>
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    required
+                    minLength={12}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    className="bg-slate-800 border-slate-700"
+                  />
+                </div>
+              )}
+            </>
+          )}
 
           {error && (
             <p role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
@@ -186,17 +269,9 @@ export default function LoginPage() {
             </p>
           )}
 
-          <Button
-            type="submit"
-            disabled={loading || rateLimited}
-            className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-semibold"
-          >
-            {loading ? 'Sending…' : 'Send magic link'}
+          <Button type="submit" disabled={loading} className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-semibold">
+            {loading ? 'Please wait…' : method === 'magic-link' ? 'Send magic link' : mode === 'signup' ? 'Create account' : 'Sign in'}
           </Button>
-
-          <p className="text-xs text-slate-500 text-center">
-            We&apos;ll email you a secure link — no password needed.
-          </p>
         </form>
       </div>
     </div>
