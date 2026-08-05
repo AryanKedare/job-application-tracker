@@ -9,6 +9,11 @@ import { CheckCircle2, KeyRound, Mail } from 'lucide-react'
 
 type Method = 'password' | 'magic-link'
 
+function currentOrigin(): string {
+  if (typeof window !== 'undefined') return window.location.origin
+  return process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+}
+
 export default function LoginPage() {
   const [method, setMethod] = useState<Method>('password')
   const [email, setEmail] = useState('')
@@ -17,9 +22,6 @@ export default function LoginPage() {
   const [sent, setSent] = useState(false)
   const [sentMessage, setSentMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
-
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ??
-    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000')
 
   const resetFeedback = () => {
     setError(null)
@@ -38,7 +40,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: `${baseUrl}/auth/recovery`,
+        redirectTo: `${currentOrigin()}/reset-password?recovery=1`,
       })
       if (resetError) throw resetError
       setSentMessage('If this invited account exists, a password reset link has been sent to')
@@ -66,7 +68,7 @@ export default function LoginPage() {
         const { error: authError } = await supabase.auth.signInWithOtp({
           email: normalizedEmail,
           options: {
-            emailRedirectTo: `${baseUrl}/auth/callback`,
+            emailRedirectTo: `${currentOrigin()}/auth/callback`,
             shouldCreateUser: false,
           },
         })
