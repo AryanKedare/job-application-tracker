@@ -5,3 +5,21 @@
     @apply bg-slate-950 text-slate-50;
   }
 }
+
+@layer components {
+  [role="dialog"]:has(> p.whitespace-pre-wrap) {
+    width: min(48rem, calc(100vw - 2rem));
+    max-width: 48rem;
+    max-height: calc(100dvh - 2rem);
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  [role="dialog"]:has(> p.whitespace-pre-wrap) > p.whitespace-pre-wrap {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    padding-right: 0.5rem;
+    line-height: 1.625;
+  }
+}
