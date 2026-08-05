@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
       if (!name) return NextResponse.json({ error: 'The user name is required.' }, { status: 400 })
 
       const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
-        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+        redirectTo: `${siteUrl}/auth/recovery`,
         data: { full_name: name, name, invited_by_admin: true },
       })
       if (inviteError) throw inviteError
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
 
     if (action === 'recovery') {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+        redirectTo: `${siteUrl}/auth/recovery`,
       })
       if (error) throw error
       return NextResponse.json({ ok: true })
