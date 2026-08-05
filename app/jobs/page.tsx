@@ -175,7 +175,7 @@ export default function JobsTablePage() {
   return (
     <>
       <div className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8 space-y-6">
+        <div className="w-full max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8 space-y-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="flex items-center gap-3">
               <Link href="/"><Button variant="outline" size="icon" className="rounded-full border-slate-700 bg-slate-900"><ArrowLeft className="w-4 h-4" /></Button></Link>
@@ -207,20 +207,70 @@ export default function JobsTablePage() {
           {filteredJobs.length === 0 ? (
             <div className="text-center py-20 rounded-2xl border border-dashed border-slate-700 text-slate-400">{jobs.length ? 'No results found.' : 'No applications yet.'}</div>
           ) : (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-800 text-left text-xs text-slate-500 uppercase"><th className="px-5 py-3.5">Company</th><th className="px-5 py-3.5">Role</th><th className="px-5 py-3.5">Location</th><th className="px-5 py-3.5">Status</th><th className="px-5 py-3.5">Apply</th><th className="px-5 py-3.5">Resume</th><th className="px-5 py-3.5">Notes</th><th className="px-5 py-3.5">Date</th><th /></tr></thead>
-              <tbody className="divide-y divide-slate-800/70">{filteredJobs.map((job) => <tr key={job.id} className="group hover:bg-slate-800/40">
-                <td className="px-5 py-3.5"><div className="flex items-center gap-3 min-w-[150px]"><CompanyAvatar name={job.company || job.job_title} /><span className="font-medium truncate max-w-[140px]">{job.company || '—'}</span></div></td>
-                <td className="px-5 py-3.5 font-semibold max-w-[240px]">{job.job_title}</td>
-                <td className="px-5 py-3.5 text-slate-400 whitespace-nowrap">{job.location || '—'}</td>
-                <td className="px-5 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} className={`appearance-none text-xs font-semibold rounded-full pl-5 pr-3 py-1 ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td>
-                <td className="px-5 py-3.5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400">Link<ExternalLink className="w-3 h-3" /></a> : '—'}</td>
-                <td className="px-5 py-3.5">{job.resume_url ? <a href={job.resume_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1"><Download className="w-3 h-3" />CV</a> : '—'}</td>
-                <td className="px-5 py-3.5">{job.notes?.trim() ? <button onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 text-amber-400"><StickyNote className="w-3 h-3" />View</button> : '—'}</td>
-                <td className="px-5 py-3.5 text-slate-500 whitespace-nowrap">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td>
-                <td className="px-5 py-3.5"><div className="flex gap-1 opacity-0 group-hover:opacity-100"><button onClick={() => setEditDialog({ open: true, job })} className="p-1.5"><Pencil className="w-3.5 h-3.5" /></button><button onClick={() => setDeleteDialog({ open: true, job })} className="p-1.5 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button></div></td>
-              </tr>)}</tbody>
-            </table></div></div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+              <div className="overflow-x-auto xl:overflow-x-visible">
+                <table className="w-full min-w-[1080px] xl:min-w-0 table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-[18%]" />
+                    <col className="w-[27%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[7%]" />
+                    <col className="w-[6%]" />
+                    <col className="w-[5%]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-slate-800 text-left text-xs text-slate-500 uppercase">
+                      <th className="px-4 py-3.5 xl:px-5">Company</th>
+                      <th className="px-4 py-3.5 xl:px-5">Role</th>
+                      <th className="px-4 py-3.5 xl:px-5">Location</th>
+                      <th className="px-4 py-3.5 xl:px-5">Status</th>
+                      <th className="px-4 py-3.5 xl:px-5">Apply</th>
+                      <th className="px-4 py-3.5 xl:px-5">Resume</th>
+                      <th className="px-4 py-3.5 xl:px-5">Notes</th>
+                      <th className="px-4 py-3.5 xl:px-5">Date</th>
+                      <th className="px-2 py-3.5" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {filteredJobs.map((job) => (
+                      <tr key={job.id} className="group hover:bg-slate-800/40">
+                        <td className="px-4 py-3.5 xl:px-5">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <CompanyAvatar name={job.company || job.job_title} />
+                            <span className="min-w-0 truncate font-medium" title={job.company || undefined}>{job.company || '—'}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 xl:px-5">
+                          <div className="truncate whitespace-nowrap font-semibold" title={job.job_title}>{job.job_title}</div>
+                        </td>
+                        <td className="px-4 py-3.5 xl:px-5">
+                          <div className="truncate whitespace-nowrap text-slate-400" title={job.location || undefined}>{job.location || '—'}</div>
+                        </td>
+                        <td className="px-4 py-3.5 xl:px-5">
+                          <div className="relative inline-block whitespace-nowrap">
+                            <select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} className={`appearance-none text-xs font-semibold rounded-full pl-5 pr-3 py-1 ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select>
+                            <span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${STATUS_STYLE[job.status].dot}`} />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 xl:px-5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 whitespace-nowrap text-blue-400">Link<ExternalLink className="w-3 h-3" /></a> : '—'}</td>
+                        <td className="px-4 py-3.5 xl:px-5">{job.resume_url ? <a href={job.resume_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 whitespace-nowrap"><Download className="w-3 h-3" />CV</a> : '—'}</td>
+                        <td className="px-4 py-3.5 xl:px-5">{job.notes?.trim() ? <button onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 whitespace-nowrap text-amber-400"><StickyNote className="w-3 h-3" />View</button> : '—'}</td>
+                        <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap xl:px-5">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td>
+                        <td className="px-2 py-3.5">
+                          <div className="flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                            <button onClick={() => setEditDialog({ open: true, job })} className="p-1.5" aria-label={`Edit ${job.job_title}`}><Pencil className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setDeleteDialog({ open: true, job })} className="p-1.5 text-red-400" aria-label={`Delete ${job.job_title}`}><Trash2 className="w-3.5 h-3.5" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </div>
       </div>
