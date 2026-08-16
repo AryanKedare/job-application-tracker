@@ -33,16 +33,3 @@ export interface ApplicationStage {
   created_at?: string
   updated_at?: string
 }
-
-export interface ApplicationStageEvent {
-  id: string
-  application_id: string
-  stage_id?: string | null
-  user_id: string
-  event_type: string
-  stage_name_snapshot?: string | null
-  from_status?: ApplicationStatus | null
-  to_status?: ApplicationStatus | null
-  notes?: string | null
-  occurred_at: string
-}
