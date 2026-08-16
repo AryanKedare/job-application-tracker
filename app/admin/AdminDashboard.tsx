@@ -64,7 +64,7 @@ export default function AdminDashboard() {
       const result = await response.json() as { code?: string; expiresAt?: number; error?: string }
       if (!response.ok || !result.code || !result.expiresAt) throw new Error(result.error || 'Could not generate invite code.')
       setGeneratedInvite({ code: result.code, expiresAt: result.expiresAt })
-      setMessage({ text: 'Invite code generated.', error: false })
+      setMessage({ text: 'Single-use invite code generated.', error: false })
     } catch (reason) {
       setMessage({ text: reason instanceof Error ? reason.message : 'Could not generate invite code.', error: true })
     } finally {
@@ -182,13 +182,13 @@ export default function AdminDashboard() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-start gap-3">
               <div className="rounded-xl bg-blue-500/15 p-2"><Ticket className="h-5 w-5 text-blue-300" /></div>
-              <div><h2 className="font-bold">Generate invite code</h2><p className="text-sm text-slate-400">Share a code so a new user can enter their own name and email. Codes expire after 7 days.</p></div>
+              <div><h2 className="font-bold">Generate invite code</h2><p className="text-sm text-slate-400">Share a single-use code so a new user can enter their own name and email. Each code expires after 15 minutes.</p></div>
             </div>
             <Button onClick={() => void generateInviteCode()} disabled={!!busy} className="bg-blue-600 hover:bg-blue-500"><Ticket className="h-4 w-4 mr-2" />{busy === 'invite-code' ? 'Generating…' : 'Generate code'}</Button>
           </div>
           {generatedInvite && <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0"><p className="text-xs uppercase tracking-wide text-slate-500">Invite code</p><p className="mt-1 break-all font-mono text-sm font-bold text-blue-200">{generatedInvite.code}</p><p className="mt-2 text-xs text-slate-500">Expires {formatLocalDateTime(generatedInvite.expiresAt)}</p></div>
+              <div className="min-w-0"><p className="text-xs uppercase tracking-wide text-slate-500">Single-use invite code</p><p className="mt-1 break-all font-mono text-sm font-bold text-blue-200">{generatedInvite.code}</p><p className="mt-2 text-xs text-slate-500">Expires {formatLocalDateTime(generatedInvite.expiresAt)}</p></div>
               <Button size="sm" variant="outline" onClick={() => void copyInviteCode()}><Copy className="h-3.5 w-3.5 mr-1.5" />Copy</Button>
             </div>
           </div>}
