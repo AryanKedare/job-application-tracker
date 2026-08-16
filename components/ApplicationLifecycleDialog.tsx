@@ -255,7 +255,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
           </div>
 
           <section className="space-y-3">
-            <h3 className="font-semibold">Interview & assessment stages</h3>
+            <h3 className="font-semibold">Application lifecycle</h3>
             {orderedStages.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">No stages yet.</div> : <div className="space-y-2">{orderedStages.map((stage, index) => <div key={stage.id} className={`rounded-xl border p-4 ${stateTone[stage.state]}`}>
               <div className="flex gap-3"><Circle className="h-5 w-5 flex-shrink-0 mt-0.5" /><div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap"><span className="font-semibold text-slate-100">{stage.name}</span><span className="text-[10px] uppercase rounded-full border px-2 py-0.5">{stage.state}</span><span className="text-xs text-slate-600">#{index + 1}</span><span className="text-[10px] text-slate-600">{stage.stage_type}</span></div>
