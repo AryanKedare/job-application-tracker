@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { KeyRound, LogOut, Mail, RefreshCw, Search, Send, Trash2, UserPlus, UserRound, Users } from 'lucide-react'
+import { Copy, KeyRound, LogOut, Mail, RefreshCw, Search, Send, Ticket, Trash2, UserPlus, UserRound, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatLocalDateTime } from '@/lib/date'
 
 interface AdminUser {
   id: string
@@ -18,6 +19,7 @@ interface AdminUser {
 }
 
 interface Stats { totalUsers: number; totalJobs: number; activeUsers: number; averageJobs: number }
+interface GeneratedInvite { code: string; expiresAt: number }
 
 export default function AdminDashboard() {
   const router = useRouter()
@@ -26,6 +28,7 @@ export default function AdminDashboard() {
   const [query, setQuery] = useState('')
   const [inviteName, setInviteName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
+  const [generatedInvite, setGeneratedInvite] = useState<GeneratedInvite | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
@@ -52,6 +55,32 @@ export default function AdminDashboard() {
     const needle = query.trim().toLowerCase()
     return needle ? users.filter((user) => `${user.name} ${user.email}`.toLowerCase().includes(needle)) : users
   }, [query, users])
+
+  const generateInviteCode = async () => {
+    setBusy('invite-code')
+    setMessage(null)
+    try {
+      const response = await fetch('/api/admin/invite-code', { method: 'POST' })
+      const result = await response.json() as { code?: string; expiresAt?: number; error?: string }
+      if (!response.ok || !result.code || !result.expiresAt) throw new Error(result.error || 'Could not generate invite code.')
+      setGeneratedInvite({ code: result.code, expiresAt: result.expiresAt })
+      setMessage({ text: 'Invite code generated.', error: false })
+    } catch (reason) {
+      setMessage({ text: reason instanceof Error ? reason.message : 'Could not generate invite code.', error: true })
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const copyInviteCode = async () => {
+    if (!generatedInvite) return
+    try {
+      await navigator.clipboard.writeText(generatedInvite.code)
+      setMessage({ text: 'Invite code copied.', error: false })
+    } catch {
+      setMessage({ text: 'Could not copy automatically. Select and copy the code manually.', error: true })
+    }
+  }
 
   const inviteUser = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -104,7 +133,7 @@ export default function AdminDashboard() {
       })
       const result = await response.json() as { error?: string }
       if (!response.ok) throw new Error(result.error || 'Email failed.')
-      setMessage({ text: action === 'recovery' ? 'Password recovery email sent.' : 'Magic link sent.', error: false })
+      setMessage({ text: action === 'recovery' ? 'Password recovery email sent. Ask the user to check spam or junk if it does not arrive.' : 'Magic link sent. Ask the user to check spam or junk if it does not arrive.', error: false })
     } catch (reason) { setMessage({ text: reason instanceof Error ? reason.message : 'Email failed.', error: true }) }
     finally { setBusy('') }
   }
@@ -149,10 +178,26 @@ export default function AdminDashboard() {
           {cards.map(([label, value, Icon]) => <div key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Icon className="h-5 w-5 text-violet-300 mb-4" /><div className="text-2xl font-black">{value}</div><div className="text-xs text-slate-400 mt-1">{label}</div></div>)}
         </section>
 
+        <section className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-blue-500/15 p-2"><Ticket className="h-5 w-5 text-blue-300" /></div>
+              <div><h2 className="font-bold">Generate invite code</h2><p className="text-sm text-slate-400">Share a code so a new user can enter their own name and email. Codes expire after 7 days.</p></div>
+            </div>
+            <Button onClick={() => void generateInviteCode()} disabled={!!busy} className="bg-blue-600 hover:bg-blue-500"><Ticket className="h-4 w-4 mr-2" />{busy === 'invite-code' ? 'Generating…' : 'Generate code'}</Button>
+          </div>
+          {generatedInvite && <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0"><p className="text-xs uppercase tracking-wide text-slate-500">Invite code</p><p className="mt-1 break-all font-mono text-sm font-bold text-blue-200">{generatedInvite.code}</p><p className="mt-2 text-xs text-slate-500">Expires {formatLocalDateTime(generatedInvite.expiresAt)}</p></div>
+              <Button size="sm" variant="outline" onClick={() => void copyInviteCode()}><Copy className="h-3.5 w-3.5 mr-1.5" />Copy</Button>
+            </div>
+          </div>}
+        </section>
+
         <section className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-5">
           <div className="flex items-start gap-3 mb-4">
             <div className="rounded-xl bg-violet-500/15 p-2"><UserPlus className="h-5 w-5 text-violet-300" /></div>
-            <div><h2 className="font-bold">Invite a user</h2><p className="text-sm text-slate-400">Creates an invite-only account and sends password setup plus magic-login emails.</p></div>
+            <div><h2 className="font-bold">Invite a user directly</h2><p className="text-sm text-slate-400">Creates an invite-only account and sends password setup plus magic-login emails.</p></div>
           </div>
           <form onSubmit={inviteUser} className="grid gap-4 md:grid-cols-[1fr_1.4fr_auto] md:items-end">
             <div className="space-y-2"><Label htmlFor="invite-name">Name</Label><Input id="invite-name" required maxLength={100} value={inviteName} onChange={(event) => setInviteName(event.target.value)} placeholder="Jane Doe" className="bg-slate-950 border-slate-700" /></div>
@@ -164,7 +209,7 @@ export default function AdminDashboard() {
         <section className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
           <div className="border-b border-slate-800 p-4"><div className="relative max-w-md"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or email" className="pl-9 bg-slate-950 border-slate-700" /></div></div>
           <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-sm"><thead className="bg-slate-900 text-left text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Name</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Jobs</th><th className="px-4 py-3">Joined</th><th className="px-4 py-3">Last sign-in</th><th className="px-4 py-3">Actions</th></tr></thead><tbody className="divide-y divide-slate-800">
-            {visibleUsers.map((user) => <tr key={user.id} className="hover:bg-slate-800/30"><td className="px-4 py-3"><Input value={user.name} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, name: event.target.value } : item))} className="bg-slate-950 border-slate-700" /></td><td className="px-4 py-3"><Input type="email" value={user.email} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, email: event.target.value } : item))} className="bg-slate-950 border-slate-700" /></td><td className="px-4 py-3 font-bold text-violet-300">{user.jobCount}</td><td className="px-4 py-3 text-slate-400">{new Date(user.createdAt).toLocaleDateString()}</td><td className="px-4 py-3 text-slate-400">{user.lastSignInAt ? new Date(user.lastSignInAt).toLocaleString() : 'Never'}</td><td className="px-4 py-3"><div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => void updateUser(user)} disabled={!!busy}>Save</Button><Button size="sm" variant="outline" onClick={() => void sendEmail(user, 'recovery')} disabled={!!busy}><KeyRound className="h-3.5 w-3.5 mr-1" />Recovery</Button><Button size="sm" variant="outline" onClick={() => void sendEmail(user, 'magic-link')} disabled={!!busy}><Send className="h-3.5 w-3.5 mr-1" />Magic link</Button><Button size="sm" variant="outline" className="text-red-300 hover:text-red-200" onClick={() => void deleteUser(user)} disabled={!!busy}><Trash2 className="h-3.5 w-3.5 mr-1" />Delete</Button></div></td></tr>)}
+            {visibleUsers.map((user) => <tr key={user.id} className="hover:bg-slate-800/30"><td className="px-4 py-3"><Input value={user.name} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, name: event.target.value } : item))} className="bg-slate-950 border-slate-700" /></td><td className="px-4 py-3"><Input type="email" value={user.email} onChange={(event) => setUsers((current) => current.map((item) => item.id === user.id ? { ...item, email: event.target.value } : item))} className="bg-slate-950 border-slate-700" /></td><td className="px-4 py-3 font-bold text-violet-300">{user.jobCount}</td><td className="px-4 py-3 text-slate-400 whitespace-nowrap">{formatLocalDateTime(user.createdAt)}</td><td className="px-4 py-3 text-slate-400 whitespace-nowrap">{user.lastSignInAt ? formatLocalDateTime(user.lastSignInAt) : 'Never'}</td><td className="px-4 py-3"><div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => void updateUser(user)} disabled={!!busy}>Save</Button><Button size="sm" variant="outline" onClick={() => void sendEmail(user, 'recovery')} disabled={!!busy}><KeyRound className="h-3.5 w-3.5 mr-1" />Recovery</Button><Button size="sm" variant="outline" onClick={() => void sendEmail(user, 'magic-link')} disabled={!!busy}><Send className="h-3.5 w-3.5 mr-1" />Magic link</Button><Button size="sm" variant="outline" className="text-red-300 hover:text-red-200" onClick={() => void deleteUser(user)} disabled={!!busy}><Trash2 className="h-3.5 w-3.5 mr-1" />Delete</Button></div></td></tr>)}
             {!loading && visibleUsers.length === 0 && <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">No users found.</td></tr>}
           </tbody></table></div>
         </section>

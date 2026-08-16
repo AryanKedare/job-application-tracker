@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ApplicationStage, JobApplication } from '@/lib/types'
+import { formatLocalDate, formatLocalDateTime } from '@/lib/date'
 import {
   Dialog,
   DialogContent,
@@ -28,23 +29,10 @@ interface Props {
 
 type ExportStage = Pick<ApplicationStage, 'application_id' | 'name' | 'position' | 'state' | 'started_at' | 'completed_at' | 'created_at'>
 
-function formatStageTime(value?: string | null) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-
-  const pad = (number: number) => String(number).padStart(2, '0')
-  const hours24 = date.getHours()
-  const hours12 = hours24 % 12 || 12
-  const period = hours24 >= 12 ? 'PM' : 'AM'
-
-  return `${pad(hours12)}:${pad(date.getMinutes())} ${period} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
-}
-
 function formatLifecycleStage(stage: ExportStage) {
   const timestamps = [
-    stage.started_at ? `started ${formatStageTime(stage.started_at)}` : '',
-    stage.completed_at ? `finished ${formatStageTime(stage.completed_at)}` : '',
+    stage.started_at ? `started ${formatLocalDateTime(stage.started_at)}` : '',
+    stage.completed_at ? `finished ${formatLocalDateTime(stage.completed_at)}` : '',
   ].filter(Boolean).join('; ')
 
   return `${stage.name} [${stage.state}]${timestamps ? ` (${timestamps})` : ''}`
@@ -90,7 +78,7 @@ async function exportToCSV(jobs: JobApplication[], userId: string) {
       j.status ?? '',
       currentOrLastStage(stages),
       stages.map(formatLifecycleStage).join(' → '),
-      j.date_applied ?? '',
+      formatLocalDateTime(j.date_applied),
       j.job_link ?? '',
       j.resume_url ?? '',
       j.source ?? '',
@@ -108,7 +96,7 @@ async function exportToCSV(jobs: JobApplication[], userId: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `job-applications-${new Date().toISOString().split('T')[0]}.csv`
+  a.download = `job-applications-${formatLocalDate(new Date()).replaceAll('/', '-')}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -144,17 +132,14 @@ export default function AccountSettingsDialog({
     setDeleteError(null)
 
     try {
-      // 1. Collect all resume storage paths
       const resumePaths = jobs
         .map((j) => {
           if (!j.resume_url) return null
-          // Extract path after "/object/public/resumes/"
           const match = j.resume_url.match(/\/object\/public\/resumes\/(.+)$/)
           return match ? match[1] : null
         })
         .filter(Boolean) as string[]
 
-      // 2. Delete files from Supabase Storage
       if (resumePaths.length > 0) {
         const { error: storageError } = await supabase.storage
           .from('resumes')
@@ -162,7 +147,6 @@ export default function AccountSettingsDialog({
         if (storageError) console.error('Storage deletion error:', storageError)
       }
 
-      // 3. Delete all job_applications rows
       const { error: dbError } = await supabase
         .from('job_applications')
         .delete()
@@ -197,8 +181,6 @@ export default function AccountSettingsDialog({
         </DialogHeader>
 
         <div className="px-6 py-5 space-y-6 max-h-[70vh] overflow-y-auto">
-
-          {/* Account info */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <User className="w-3.5 h-3.5" /> Account
@@ -230,7 +212,6 @@ export default function AccountSettingsDialog({
             </div>
           </section>
 
-          {/* Export */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <Download className="w-3.5 h-3.5" /> Export Data
@@ -256,7 +237,6 @@ export default function AccountSettingsDialog({
             </div>
           </section>
 
-          {/* Danger zone */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5" /> Danger Zone
@@ -346,7 +326,6 @@ export default function AccountSettingsDialog({
               </div>
             )}
           </section>
-
         </div>
 
         <div className="px-6 py-4 border-t border-slate-800 flex justify-end">
