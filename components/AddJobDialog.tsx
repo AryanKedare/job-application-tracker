@@ -22,7 +22,7 @@ interface Props {
 
 const EMPTY_FORM = {
   job_title: '', company: '', job_link: '',
-  status: 'Bookmarked' as JobApplication['status'],
+  status: 'Applied' as JobApplication['status'],
   location: '', source: '', notes: '',
 }
 
