@@ -78,12 +78,23 @@ MAINTENANCE_MODE=true
 
 While maintenance mode is enabled:
 
-- normal user-facing routes display the maintenance page
+- normal visitors see the maintenance page on user-facing routes
 - non-admin API requests return HTTP `503 Service Unavailable`
 - `/admin` and `/api/admin/*` remain available so administrators can continue working
+- a browser with a valid signed admin session can bypass maintenance mode and use the real production application
 - Next.js static assets remain available so the maintenance page renders normally
 
-To restore normal access, set the variable to `false` (or remove it) and redeploy:
+### Test production while maintenance mode stays enabled
+
+1. Open `/admin` in your normal browser and sign in as administrator.
+2. In the same browser, open `/jobs` or `/login`. The valid admin session cookie bypasses maintenance mode.
+3. If you need to test user-specific features, sign in to a normal Job Tracker user account in that same browser and test the full production workflow.
+4. Open the production site in an incognito/private window (where the admin cookie is absent) and confirm normal visitors still see the maintenance page.
+5. Signing out of the admin portal removes the bypass; subsequent user-facing requests in that browser return to maintenance mode.
+
+The bypass uses the existing signed, HTTP-only admin session cookie. There is no query-string bypass token or additional public secret.
+
+To restore normal access for everyone, set the variable to `false` (or remove it) and redeploy:
 
 ```env
 MAINTENANCE_MODE=false
