@@ -140,7 +140,27 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
         : supabase.from('job_applications').insert([{ ...values, user_id: userId }])
       const { data, error } = await query.select().single()
       if (error || !data) throw error
-      onSuccess(data as JobApplication)
+
+      const savedJob = data as JobApplication
+      if (!editJob && savedJob.status !== 'Bookmarked') {
+        const appliedAt = savedJob.created_at ?? new Date().toISOString()
+        const { error: stageError } = await supabase.from('application_stages').insert({
+          application_id: savedJob.id,
+          user_id: userId,
+          name: 'Applied',
+          stage_type: 'application',
+          position: 0,
+          state: 'completed',
+          started_at: appliedAt,
+          completed_at: appliedAt,
+        })
+        if (stageError) {
+          await supabase.from('job_applications').delete().eq('id', savedJob.id).eq('user_id', userId)
+          throw stageError
+        }
+      }
+
+      onSuccess(savedJob)
       setOpen(false)
     } catch {
       onError(editJob ? 'Failed to update application.' : 'Failed to add application.')
