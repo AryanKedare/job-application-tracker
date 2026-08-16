@@ -172,7 +172,7 @@ create policy "Users can delete their application stages"
   );
 
 -- -----------------------------------------------------------------------------
--- 4. Immutable lifecycle history
+-- 4. Lifecycle history
 -- -----------------------------------------------------------------------------
 
 create table if not exists public.application_stage_events (
@@ -198,6 +198,8 @@ alter table public.application_stage_events enable row level security;
 
 drop policy if exists "Users can read their lifecycle events" on public.application_stage_events;
 drop policy if exists "Users can create their lifecycle events" on public.application_stage_events;
+drop policy if exists "Users can update their lifecycle events" on public.application_stage_events;
+drop policy if exists "Users can delete their lifecycle events" on public.application_stage_events;
 
 create policy "Users can read their lifecycle events"
   on public.application_stage_events
@@ -225,8 +227,44 @@ create policy "Users can create their lifecycle events"
     )
   );
 
--- No update/delete policies are intentionally created for lifecycle events.
--- Users can read/append their own events, while history remains immutable.
+create policy "Users can update their lifecycle events"
+  on public.application_stage_events
+  for update
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.job_applications j
+      where j.id = application_id
+        and j.user_id = auth.uid()
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.job_applications j
+      where j.id = application_id
+        and j.user_id = auth.uid()
+    )
+  );
+
+create policy "Users can delete their lifecycle events"
+  on public.application_stage_events
+  for delete
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.job_applications j
+      where j.id = application_id
+        and j.user_id = auth.uid()
+    )
+  );
+
+-- History rows are user-editable by design. Editing/deleting a history row changes
+-- the recorded timeline only; it does not automatically mutate live application
+-- status or application_stages state.
 
 -- -----------------------------------------------------------------------------
 -- 5. Lifecycle trigger functions
