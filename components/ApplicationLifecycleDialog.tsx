@@ -121,10 +121,8 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
   const [schemaMissing, setSchemaMissing] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT_FORM)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [eventEditingId, setEventEditingId] = useState<string | null>(null)
   const [eventEditForm, setEventEditForm] = useState<EventForm>(EMPTY_EVENT_FORM)
-  const [eventDeleteConfirmId, setEventDeleteConfirmId] = useState<string | null>(null)
   const [addingEvent, setAddingEvent] = useState(false)
   const [addEventForm, setAddEventForm] = useState<EventForm>(EMPTY_EVENT_FORM)
 
@@ -206,7 +204,6 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
   }
 
   const beginEdit = (stage: ApplicationStage) => {
-    setDeleteConfirmId(null)
     setEditingId(stage.id)
     setEditForm({ name: stage.name, stage_type: stage.stage_type, state: stage.state, started_at: toLocalDateTime(stage.started_at), completed_at: toLocalDateTime(stage.completed_at) })
   }
@@ -277,13 +274,11 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     }
 
     setBusy(null)
-    setDeleteConfirmId(null)
     if (editingId === stage.id) cancelEdit()
     await refresh()
   }
 
   const beginEventEdit = (event: ApplicationStageEvent) => {
-    setEventDeleteConfirmId(null)
     setAddingEvent(false)
     setEventEditingId(event.id)
     setEventEditForm({
@@ -346,7 +341,6 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     const { error } = await supabase.from('application_stage_events').delete().eq('id', event.id).eq('application_id', job.id).eq('user_id', userId)
     setBusy(null)
     if (error) return onError('Failed to delete lifecycle history. Re-run supabase/setup.sql if this database has not been upgraded.')
-    setEventDeleteConfirmId(null)
     if (eventEditingId === event.id) cancelEventEdit()
     await load()
   }
@@ -391,7 +385,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
                   <Button size="icon" variant="outline" disabled={busy === stage.id || index === 0} onClick={() => void move(stage, -1)} className="h-8 w-8 border-slate-700"><ArrowUp className="h-3.5 w-3.5" /></Button>
                   <Button size="icon" variant="outline" disabled={busy === stage.id || index === orderedStages.length - 1} onClick={() => void move(stage, 1)} className="h-8 w-8 border-slate-700"><ArrowDown className="h-3.5 w-3.5" /></Button>
                   <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => beginEdit(stage)} className="h-8 border-slate-700"><Pencil className="h-3.5 w-3.5 mr-1" />Edit</Button>
-                  <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => { setDeleteConfirmId(stage.id); if (editingId === stage.id) cancelEdit() }} className="h-8 border-red-500/30 text-red-300"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete</Button>
+                  <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void remove(stage)} className="h-8 border-red-500/30 text-red-300"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete</Button>
                 </div>
 
                 {editingId === stage.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-4 text-slate-100">
@@ -405,8 +399,6 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
                   </div>
                   <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={cancelEdit} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === stage.id} onClick={() => void saveEdit(stage)} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Save changes</Button></div>
                 </div>}
-
-                {deleteConfirmId === stage.id && <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-slate-100"><div className="font-semibold text-red-200">Delete “{stage.name}”?</div><p className="text-xs text-slate-400 mt-1">The stage will be removed even if it is current, completed, skipped, or rejected. Existing lifecycle events remain until you edit or delete them separately.</p><div className="flex justify-end gap-2 mt-3"><Button size="sm" variant="outline" onClick={() => setDeleteConfirmId(null)} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === stage.id} onClick={() => void remove(stage)} className="bg-red-600 hover:bg-red-700 text-white"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete stage</Button></div></div>}
               </div></div>
             </div>)}</div>}
 
@@ -423,11 +415,9 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
             </div>}
 
             {events.length === 0 ? <div className="text-sm text-slate-500">No lifecycle events yet.</div> : <div className="space-y-2">{events.map((event) => <div key={event.id} className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2.5">
-              <div className="flex gap-3"><Clock3 className="h-4 w-4 mt-0.5 text-slate-500" /><div className="min-w-0 flex-1"><div className="text-sm">{EVENT_LABEL[event.event_type] ?? event.event_type.replaceAll('_', ' ')}{event.stage_name_snapshot && <b> · {event.stage_name_snapshot}</b>}</div>{event.from_status && event.to_status && <div className="text-xs text-slate-500">{event.from_status} → {event.to_status}</div>}{event.notes && <div className="text-xs text-slate-500 whitespace-pre-wrap">{event.notes}</div>}<div className="text-[11px] text-slate-600">{fmt(event.occurred_at)}</div></div><div className="flex gap-1"><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => beginEventEdit(event)} className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => { setEventDeleteConfirmId(event.id); if (eventEditingId === event.id) cancelEventEdit() }} className="h-7 w-7 text-red-300"><Trash2 className="h-3.5 w-3.5" /></Button></div></div>
+              <div className="flex gap-3"><Clock3 className="h-4 w-4 mt-0.5 text-slate-500" /><div className="min-w-0 flex-1"><div className="text-sm">{EVENT_LABEL[event.event_type] ?? event.event_type.replaceAll('_', ' ')}{event.stage_name_snapshot && <b> · {event.stage_name_snapshot}</b>}</div>{event.from_status && event.to_status && <div className="text-xs text-slate-500">{event.from_status} → {event.to_status}</div>}{event.notes && <div className="text-xs text-slate-500 whitespace-pre-wrap">{event.notes}</div>}<div className="text-[11px] text-slate-600">{fmt(event.occurred_at)}</div></div><div className="flex gap-1"><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => beginEventEdit(event)} className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => void removeEvent(event)} className="h-7 w-7 text-red-300"><Trash2 className="h-3.5 w-3.5" /></Button></div></div>
 
               {eventEditingId === event.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-900/80 p-4 space-y-4"><div className="flex items-center justify-between gap-3"><div className="font-semibold">Edit history entry</div><Button size="icon" variant="ghost" onClick={cancelEventEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>{renderEventForm(eventEditForm, setEventEditForm)}<div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={cancelEventEdit} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === `event-${event.id}`} onClick={() => void saveEventEdit(event)} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Save history</Button></div></div>}
-
-              {eventDeleteConfirmId === event.id && <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4"><div className="font-semibold text-red-200">Delete this history entry?</div><p className="text-xs text-slate-400 mt-1">This removes the event from the timeline. It does not undo or change the current application/stage state.</p><div className="flex justify-end gap-2 mt-3"><Button size="sm" variant="outline" onClick={() => setEventDeleteConfirmId(null)} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === `event-${event.id}`} onClick={() => void removeEvent(event)} className="bg-red-600 hover:bg-red-700 text-white"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete history</Button></div></div>}
             </div>)}</div>}
           </section>
         </div>}
