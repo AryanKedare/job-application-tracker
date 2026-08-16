@@ -37,6 +37,20 @@ interface EventForm {
   occurred_at: string
 }
 
+interface EventPayload {
+  event_type: string
+  stage_id: string | null
+  stage_name_snapshot: string | null
+  from_status: string | null
+  to_status: string | null
+  notes: string | null
+  occurred_at: string
+}
+
+type EventPayloadResult =
+  | { ok: false; error: string }
+  | { ok: true; value: EventPayload }
+
 const PRESETS = [
   ['recruiter-screening', 'Recruiter Screening', 'screening'],
   ['hr-interview', 'HR Interview', 'interview'],
@@ -285,12 +299,13 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
 
   const cancelEventEdit = () => { setEventEditingId(null); setEventEditForm(EMPTY_EVENT_FORM) }
 
-  const eventPayload = (form: EventForm) => {
+  const eventPayload = (form: EventForm): EventPayloadResult => {
     const eventType = form.event_type.trim()
     const occurredAt = toIso(form.occurred_at)
-    if (!eventType) return { error: 'History event type cannot be empty.' } as const
-    if (!occurredAt) return { error: 'History event date/time is required.' } as const
+    if (!eventType) return { ok: false, error: 'History event type cannot be empty.' }
+    if (!occurredAt) return { ok: false, error: 'History event date/time is required.' }
     return {
+      ok: true,
       value: {
         event_type: eventType,
         stage_id: form.stage_id || null,
@@ -300,12 +315,12 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
         notes: form.notes.trim() || null,
         occurred_at: occurredAt,
       },
-    } as const
+    }
   }
 
   const saveEventEdit = async (event: ApplicationStageEvent) => {
     const payload = eventPayload(eventEditForm)
-    if ('error' in payload) return onError(payload.error)
+    if (!payload.ok) return onError(payload.error)
     setBusy(`event-${event.id}`)
     const { error } = await supabase.from('application_stage_events').update(payload.value).eq('id', event.id).eq('application_id', job.id).eq('user_id', userId)
     setBusy(null)
@@ -316,7 +331,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
 
   const addHistoryEvent = async () => {
     const payload = eventPayload(addEventForm)
-    if ('error' in payload) return onError(payload.error)
+    if (!payload.ok) return onError(payload.error)
     setBusy('event-add')
     const { error } = await supabase.from('application_stage_events').insert({ application_id: job.id, user_id: userId, ...payload.value })
     setBusy(null)
