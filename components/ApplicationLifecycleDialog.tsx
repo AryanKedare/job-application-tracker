@@ -242,7 +242,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-slate-900 border-slate-700 text-slate-100">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><ListTree className="h-5 w-5 text-blue-400" />{job.job_title} lifecycle</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><ListTree className="h-5 w-5 text-blue-400" />{job.job_title}</DialogTitle>
           <p className="text-sm text-slate-400">{job.company || 'Unknown company'} · {job.status}</p>
         </DialogHeader>
 
