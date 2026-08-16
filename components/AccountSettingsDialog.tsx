@@ -31,7 +31,14 @@ type ExportStage = Pick<ApplicationStage, 'application_id' | 'name' | 'position'
 function formatStageTime(value?: string | null) {
   if (!value) return ''
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toISOString()
+  if (Number.isNaN(date.getTime())) return value
+
+  const pad = (number: number) => String(number).padStart(2, '0')
+  const hours24 = date.getHours()
+  const hours12 = hours24 % 12 || 12
+  const period = hours24 >= 12 ? 'PM' : 'AM'
+
+  return `${pad(hours12)}:${pad(date.getMinutes())} ${period} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
 }
 
 function formatLifecycleStage(stage: ExportStage) {
