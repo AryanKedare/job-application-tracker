@@ -496,7 +496,32 @@ where not exists (
 );
 
 -- -----------------------------------------------------------------------------
--- 6. Resume storage bucket
+-- 6. Single-use invite codes
+-- -----------------------------------------------------------------------------
+
+create table if not exists public.invite_codes (
+  id uuid primary key default gen_random_uuid(),
+  code_hash text not null unique check (char_length(code_hash) = 64),
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists invite_codes_expires_at_idx
+  on public.invite_codes(expires_at);
+
+create index if not exists invite_codes_used_at_idx
+  on public.invite_codes(used_at);
+
+alter table public.invite_codes enable row level security;
+
+-- Invite codes are never read or written directly from the browser. Only the
+-- server-side service-role client may create, validate, claim, or release them.
+revoke all on table public.invite_codes from anon, authenticated;
+grant select, insert, update, delete on table public.invite_codes to service_role;
+
+-- -----------------------------------------------------------------------------
+-- 7. Resume storage bucket
 -- -----------------------------------------------------------------------------
 
 -- The current application stores public resume URLs, so the bucket is public.

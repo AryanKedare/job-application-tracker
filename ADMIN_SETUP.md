@@ -10,7 +10,7 @@ Before using the admin portal, run the repository's canonical SQL setup file in 
 supabase/setup.sql
 ```
 
-That one file creates/configures the application tables, interview-stage lifecycle tables, Row-Level Security policies, lifecycle triggers, resume bucket, and resume storage policies.
+That one file creates/configures the application tables, interview-stage lifecycle tables, invite-code storage, Row-Level Security policies, lifecycle triggers, resume bucket, and resume storage policies.
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the complete fresh-install and upgrade process.
 
@@ -55,12 +55,14 @@ The admin portal can:
 - show active users and average jobs per user
 - search users
 - invite new users by name/email
-- generate invite codes for self-service onboarding
+- generate single-use invite codes for self-service onboarding that expire after 15 minutes
 - edit a user's name or email
 - send password-recovery emails
 - send magic links
 - delete a user and their application data
 - remove files from that user's `resumes/<user-id>` storage folder
+
+Invite codes are stored only as SHA-256 hashes in `public.invite_codes`. A code is atomically marked used when redemption begins, cannot be redeemed a second time, and is released again only if sending the onboarding email fails.
 
 Deleting a job application also cascades its interview stages and lifecycle event records through the database relationships configured in `supabase/setup.sql`.
 
