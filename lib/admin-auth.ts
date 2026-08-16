@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 
 export const ADMIN_COOKIE_NAME = 'job-tracker-admin-session'
 export const ADMIN_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
-export const INVITE_CODE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+export const INVITE_CODE_MAX_AGE_SECONDS = 15 * 60
 
 type AdminSessionPayload = { email: string; expiresAt: number }
 
@@ -60,6 +60,10 @@ export function createInviteCode(): { code: string; expiresAt: number } {
     code: `JT-${expiryToken}-${nonce}-${signInvite(payload)}`,
     expiresAt,
   }
+}
+
+export function hashInviteCode(value: string): string {
+  return createHash('sha256').update(value.trim().toUpperCase()).digest('hex')
 }
 
 export function verifyInviteCode(value: string): boolean {
