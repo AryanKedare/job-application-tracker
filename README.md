@@ -2,22 +2,50 @@
 
 A modern, self-hosted job application tracker built with **Next.js**, **Supabase**, **Tailwind CSS**, and optional **Groq AI**.
 
-Track applications, save job descriptions and CVs, search and filter your pipeline, invite users, and manage the whole installation from a secure admin dashboard.
+Track applications, interview rounds, assessments, resumes, notes, lifecycle history, and outcomes in one place.
 
-> This project is designed for private or small-team use. User registration is invitation-only.
+> Designed for private or small-team use. User registration is invitation-only.
 
 ## Features
 
 ### Job tracking
 
 - Add, edit, and delete job applications
-- Track six statuses: `Bookmarked`, `Applied`, `Interviewing`, `Offer`, `Rejected`, and `Ghosted`
-- Save company, role, location, source, application link, date, notes, and resume
-- Search by company, role, or location
-- Filter applications by status
+- Track top-level statuses: `Bookmarked`, `Applied`, `Interviewing`, `Offer`, `Rejected`, and `Ghosted`
+- New applications default to `Applied`
+- Keep `Bookmarked` for roles you saved but have not applied to yet
+- Save company, role, location, source, job link, date, notes, and resume
+- Search by company, role, location, or interview stage
+- Filter by application status
 - Live statistics for applications, interviews, and offers
-- Responsive table layout for desktop and smaller screens
-- Long notes open in a scrollable modal
+
+### Application lifecycle and interview stages
+
+Each application can have its own ordered pipeline instead of being limited to generic statuses.
+
+Examples:
+
+```text
+Applied
+Recruiter Screening
+Coding Assessment
+Technical Interview - Round 1
+Technical Interview - Round 2
+Hiring Manager Interview
+Final Interview
+```
+
+You can:
+
+- add unlimited interview/assessment stages
+- use built-in stage templates or custom names
+- reorder future stages
+- start, complete, skip, or reject at a stage
+- record exactly which round an application was rejected at
+- preserve a timestamped lifecycle history
+- keep one active/current stage per application
+
+Stage history is stored separately from the high-level application status, so an application can remain `Interviewing` while still showing exactly which round it is in.
 
 ### AI-assisted job import
 
@@ -34,52 +62,23 @@ Paste a job-posting URL and let the importer fill in:
 
 When `GROQ_API_KEY` is configured, Groq produces structured notes. Without Groq, the app falls back to job-page metadata and JSON-LD where available.
 
-The importer includes URL validation, redirect limits, response-size limits, timeouts, and checks that block private or local network addresses.
+### Authentication and admin
 
-### Authentication
-
-- Email and password sign-in
+- Email/password sign-in
 - Password recovery
 - Magic-link sign-in
-- Invitation-only user onboarding
-- Password-reset page for recovery and invitation links
-- Supabase session handling
+- Invitation-only onboarding
+- Secure admin dashboard at `/admin`
+- Invite users, update user details, send recovery links, and delete users/data
+- Supabase Row-Level Security keeps user data isolated
 
-Public sign-up is disabled. New users are invited from the admin dashboard.
+### Resumes
 
-### Admin dashboard
-
-The admin dashboard is available at `/admin` and includes:
-
-- Separate admin email and password authentication
-- Total users, total applications, active users, and average jobs per user
-- User search
-- Invite users by name and email
-- Send onboarding, password-recovery, and magic-link emails
-- Update a user's name or email
-- Delete a user, their job rows, and their resume files
-
-Admin actions use the Supabase service-role key on the server only.
-
-### Company logos
-
-Company logos are resolved server-side using:
-
-1. Logo.dev, when an optional publishable key is configured
-2. Wikidata and Wikimedia Commons
-3. The company's official website metadata
-4. A coloured initials avatar when no logo can be found
-
-The app does not use job-board favicons as company logos.
-
-### Account and data controls
-
-- Update display name
-- Export application data
-- Delete application data
-- Delete account
 - Upload PDF resumes up to 5 MB
-- Row-Level Security keeps each user's job records separate
+- Resume files are stored under each user's folder in the `resumes` bucket
+- The current implementation uses public resume URLs
+
+> For sensitive deployments, consider switching the bucket to private storage and signed URLs.
 
 ## Technology stack
 
@@ -94,19 +93,9 @@ The app does not use job-board favicons as company logos.
 | AI extraction | Groq API, optional |
 | Deployment | Vercel or another Node.js-compatible platform |
 
-## Before you begin
-
-Install these first:
-
-- Node.js 20 or newer
-- npm
-- A Supabase account
-- A Vercel account for the easiest deployment
-- A Groq account only when AI extraction is required
-
 ## Quick start
 
-### 1. Clone the project
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/AryanKedare/job-application-tracker.git
@@ -116,136 +105,55 @@ npm install
 
 ### 2. Create a Supabase project
 
-1. Sign in to Supabase.
-2. Create a new project.
-3. Wait for the database to finish provisioning.
-4. Open **Project Settings → API**.
-5. Copy the project URL, anon key, and service-role key.
+Create a project in Supabase, then open **Project Settings → API** and copy:
 
-Keep the service-role key secret. Never expose it in browser code or use a `NEXT_PUBLIC_` prefix.
+- Project URL
+- anon/public key
+- service-role key
 
-### 3. Create the database table
+Keep the service-role key server-side only.
 
-Open **Supabase → SQL Editor**, create a new query, and run:
+### 3. Run the complete database setup
 
-```sql
-create extension if not exists pgcrypto;
+All database tables, indexes, RLS policies, lifecycle triggers, lifecycle history, and resume storage policies are consolidated into one file:
 
-create table if not exists public.job_applications (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  job_title text not null,
-  company text,
-  job_link text,
-  status text not null default 'Bookmarked'
-    check (status in ('Bookmarked', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Ghosted')),
-  date_applied date,
-  location text,
-  source text,
-  resume_url text,
-  notes text,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists job_applications_user_id_idx
-  on public.job_applications(user_id);
-
-create index if not exists job_applications_user_date_idx
-  on public.job_applications(user_id, date_applied desc);
-
-alter table public.job_applications enable row level security;
-
-drop policy if exists "Users can read their applications" on public.job_applications;
-drop policy if exists "Users can create their applications" on public.job_applications;
-drop policy if exists "Users can update their applications" on public.job_applications;
-drop policy if exists "Users can delete their applications" on public.job_applications;
-
-create policy "Users can read their applications"
-  on public.job_applications
-  for select
-  using (auth.uid() = user_id);
-
-create policy "Users can create their applications"
-  on public.job_applications
-  for insert
-  with check (auth.uid() = user_id);
-
-create policy "Users can update their applications"
-  on public.job_applications
-  for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "Users can delete their applications"
-  on public.job_applications
-  for delete
-  using (auth.uid() = user_id);
+```text
+supabase/setup.sql
 ```
 
-### 4. Create the resume bucket
+For a **fresh installation**:
 
-In **Supabase → Storage**:
+1. Open **Supabase → SQL Editor**.
+2. Create a new query.
+3. Copy the full contents of `supabase/setup.sql`.
+4. Run it once.
 
-1. Click **New bucket**.
-2. Name it `resumes`.
-3. Make it public because the current application stores public resume URLs.
-4. Set a file-size limit of 5 MB when available.
-5. Restrict accepted files to PDF when available.
+That single file creates/configures:
 
-Then run these storage policies in the SQL Editor:
+- `job_applications`
+- `application_stages`
+- `application_stage_events`
+- indexes
+- Row-Level Security policies
+- lifecycle/event triggers
+- `resumes` storage bucket
+- resume storage policies
 
-```sql
-alter table storage.objects enable row level security;
+The script is designed to be idempotent, so it can also be run on an existing installation to add the newer lifecycle schema. Existing `Bookmarked` rows are preserved; only the default for newly created applications becomes `Applied`.
 
-drop policy if exists "Users can upload their resumes" on storage.objects;
-drop policy if exists "Users can update their resumes" on storage.objects;
-drop policy if exists "Users can delete their resumes" on storage.objects;
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full setup and upgrade guide.
 
-create policy "Users can upload their resumes"
-  on storage.objects
-  for insert
-  to authenticated
-  with check (
-    bucket_id = 'resumes'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+### 4. Configure authentication URLs
 
-create policy "Users can update their resumes"
-  on storage.objects
-  for update
-  to authenticated
-  using (
-    bucket_id = 'resumes'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  )
-  with check (
-    bucket_id = 'resumes'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+In **Supabase → Authentication → URL Configuration**:
 
-create policy "Users can delete their resumes"
-  on storage.objects
-  for delete
-  to authenticated
-  using (
-    bucket_id = 'resumes'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-```
-
-> Privacy note: a public bucket means anyone with a resume URL can access that file. For highly sensitive deployments, migrate the app to a private bucket with signed URLs before inviting users.
-
-### 5. Configure authentication URLs
-
-Open **Supabase → Authentication → URL Configuration**.
-
-For local development, use:
+For local development:
 
 ```text
 Site URL: http://localhost:3000
 ```
 
-Add these redirect URLs:
+Add:
 
 ```text
 http://localhost:3000/**
@@ -253,85 +161,46 @@ http://localhost:3000/auth/callback
 http://localhost:3000/reset-password**
 ```
 
-For production, replace the domain with your real application URL:
+For production, replace the domain with your deployed URL.
 
-```text
-https://your-domain.example/**
-https://your-domain.example/auth/callback
-https://your-domain.example/reset-password**
-```
+### 5. Check email templates
 
-Using the wildcard entry is convenient for previews. For a stricter production setup, list only the exact routes required by the application.
-
-### 6. Check the Supabase email templates
-
-Open **Supabase → Authentication → Email Templates**.
-
-The password-reset template must link to `ConfirmationURL`:
+The password-reset template should use Supabase's generated confirmation URL:
 
 ```html
 <a href="{{ .ConfirmationURL }}">Reset password</a>
 ```
 
-Do not hardcode `SiteURL` as the reset button destination.
+Invitation and magic-link templates should also use the generated confirmation URL.
 
-The invitation and magic-link templates should also use Supabase's generated confirmation URL. After changing a template or redirect setting, request a new email because old emails keep their original links.
-
-### 7. Create the environment file
-
-Create `.env.local` in the repository root:
+### 6. Create `.env.local`
 
 ```env
-# Public Supabase configuration
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 
-# Server-only Supabase key used by the admin dashboard
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Separate admin login
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=replace-with-a-long-random-password
 ADMIN_SESSION_SECRET=replace-with-at-least-32-random-characters
 
-# Optional AI import
+# Optional
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=llama-3.3-70b-versatile
-
-# Optional higher-priority company-logo provider
 LOGO_DEV_PUBLISHABLE_KEY=your-logo-dev-publishable-key
 ```
 
-Required variables:
+Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, or `GROQ_API_KEY` with a `NEXT_PUBLIC_` prefix.
 
-| Variable | Purpose |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser-safe Supabase anon key |
-| `NEXT_PUBLIC_SITE_URL` | Base URL used in auth emails and redirects |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key for admin user management |
-| `ADMIN_EMAIL` | Email accepted by `/admin` |
-| `ADMIN_PASSWORD` | Password accepted by `/admin` |
-| `ADMIN_SESSION_SECRET` | Signs the admin session cookie; use at least 32 random characters |
-
-Optional variables:
-
-| Variable | Purpose |
-|---|---|
-| `GROQ_API_KEY` | Enables structured AI extraction from job pages |
-| `GROQ_MODEL` | Overrides the default Groq model |
-| `LOGO_DEV_PUBLISHABLE_KEY` | Uses Logo.dev before the free logo fallbacks |
-
-Never prefix `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, or `GROQ_API_KEY` with `NEXT_PUBLIC_`.
-
-Generate a session secret with Node.js:
+Generate an admin session secret with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-### 8. Start the application
+### 7. Start the app
 
 ```bash
 npm run dev
@@ -339,183 +208,181 @@ npm run dev
 
 Open:
 
-- Application: `http://localhost:3000`
+- App: `http://localhost:3000`
 - User login: `http://localhost:3000/login`
-- Admin login: `http://localhost:3000/admin`
+- Admin: `http://localhost:3000/admin`
+
+## Existing installation upgrade
+
+If you already have `job_applications` and resume storage configured, you no longer need to apply separate lifecycle SQL snippets.
+
+Run the current:
+
+```text
+supabase/setup.sql
+```
+
+The script uses `if not exists`, policy recreation, and safe `alter table ... add column if not exists` operations where appropriate. It will:
+
+- keep existing application rows
+- keep existing `Bookmarked` statuses unchanged
+- change only the default status for new rows to `Applied`
+- create the lifecycle tables if missing
+- add rejection-stage fields
+- add lifecycle triggers and history
+- create a starting history event for pre-existing applications that do not already have lifecycle events
+
+Back up production data before applying schema changes as normal operational practice.
+
+## Application lifecycle behaviour
+
+### New applications
+
+A newly added application starts as:
+
+```text
+Applied
+```
+
+### Starting an interview stage
+
+Starting a stage automatically moves the high-level status to:
+
+```text
+Interviewing
+```
+
+### Completing a round
+
+Completing a round does **not** automatically start the next one. This keeps the history accurate when a recruiter rejects the application after a completed round but before the next round actually begins.
+
+### Rejection
+
+Rejecting at a stage records:
+
+- application status = `Rejected`
+- rejected stage name
+- rejected timestamp
+- lifecycle event snapshot
+
+This lets the app show outcomes such as:
+
+```text
+Rejected at: Technical Interview - Round 2
+```
 
 ## First-time user setup
 
-The application is invitation-only.
-
 1. Open `/admin`.
 2. Sign in using `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
-3. Enter the user's name and email.
-4. Send the invitation.
-5. The user follows the email link and sets a password.
-6. The user can later sign in with password or request a magic link.
+3. Invite the user by name/email.
+4. The user follows the invitation link and sets a password.
+5. The user can then sign in with password or magic link.
 
-If an invitation or reset link goes to the homepage, verify:
-
-- `NEXT_PUBLIC_SITE_URL` matches the deployed domain
-- The domain and reset-password route are allowed in Supabase redirect URLs
-- The email template uses `{{ .ConfirmationURL }}`
-- A newly generated email is being tested
-
-## AI import behaviour
-
-When a user clicks **Auto-fill details**, the server:
-
-1. Validates the URL.
-2. Blocks local and private network targets.
-3. Downloads a limited amount of HTML with a timeout.
-4. Reads structured `JobPosting` metadata when available.
-5. Sends cleaned job text to Groq when configured.
-6. Returns structured notes containing summary, responsibilities, required qualifications, and preferred skills.
-
-Some websites render job descriptions only with client-side JavaScript or block automated requests. Those pages may return partial details or require manual entry.
+See [ADMIN_SETUP.md](ADMIN_SETUP.md) for admin-specific configuration.
 
 ## Deploying to Vercel
 
-### 1. Import the repository
-
-1. Push your fork to GitHub.
-2. Sign in to Vercel.
-3. Click **Add New → Project**.
-4. Import the repository.
-5. Keep the default Next.js build settings.
-
-### 2. Add environment variables
-
-Add every required variable from `.env.local` under:
-
-**Vercel → Project → Settings → Environment Variables**
-
-Add them to Production and Preview when both environments are used.
-
-For production, set:
-
-```env
-NEXT_PUBLIC_SITE_URL=https://your-production-domain.example
-```
-
-Environment-variable changes affect new deployments only. Redeploy after adding or changing variables.
-
-### 3. Update Supabase URLs
-
-Set the Supabase Site URL to the production domain and add the production redirect URLs listed earlier.
-
-### 4. Test the complete flow
-
-Before inviting real users, test:
-
-- Admin login
-- User invitation
-- Password creation
-- Password sign-in
-- Magic-link sign-in
-- Forgot-password flow
-- Adding and editing an application
-- Resume upload and download
-- AI import
-- Account deletion
+1. Import the repository into Vercel.
+2. Add all required environment variables.
+3. Set `NEXT_PUBLIC_SITE_URL` to the production domain.
+4. Add that domain to Supabase authentication redirect URLs.
+5. Run `supabase/setup.sql` against the production Supabase project.
+6. Deploy/redeploy.
+7. Test authentication, application creation, stage tracking, resume upload, and deletion flows.
 
 ## Project structure
 
 ```text
 app/
-├── admin/                    Admin login and user-management dashboard
+├── admin/                    Admin dashboard
 ├── api/
-│   ├── admin/                Server-only admin authentication and user actions
-│   ├── company-logo/         Company-logo resolver and proxy
-│   └── jobs/import/          Job-page and Groq extraction endpoint
-├── auth/callback/            Supabase magic-link callback
-├── jobs/                     Main application-tracking dashboard
-├── login/                    User sign-in and password recovery
-├── reset-password/           Password setup and recovery page
-└── page.tsx                  Landing and account overview
+│   ├── admin/                Server-side admin endpoints
+│   ├── company-logo/         Company-logo resolver
+│   └── jobs/import/          Job-page/Groq importer
+├── auth/callback/            Supabase auth callback
+├── jobs/                     Application dashboard
+├── login/                    User authentication
+├── reset-password/           Password setup/recovery
+└── page.tsx                  Landing/account overview
 
 components/
-├── AddJobDialog.tsx          Add/edit form and AI import interface
-├── AccountSettingsDialog.tsx Account and data controls
-├── DeleteConfirmDialog.tsx   Destructive-action confirmation
-├── Toast.tsx                 User feedback
-└── ui/                       Reusable UI primitives
+├── AddJobDialog.tsx                 Add/edit application form
+├── ApplicationLifecycleDialog.tsx   Interview-stage and history manager
+├── AccountSettingsDialog.tsx        Account/data controls
+├── DeleteConfirmDialog.tsx          Delete confirmation
+├── Toast.tsx                        User feedback
+└── ui/                              Reusable UI primitives
 
 lib/
-├── admin-auth.ts             Admin credential and signed-cookie logic
-├── admin-request.ts          Admin request protection
-├── admin-supabase.ts         Server-only service-role client
-├── supabase.ts               Browser Supabase client
-└── types.ts                  Shared application types
+├── admin-auth.ts
+├── admin-request.ts
+├── admin-supabase.ts
+├── supabase.ts
+└── types.ts
+
+supabase/
+└── setup.sql                 Canonical one-file database/storage setup
+
+docs/
+└── INSTALLATION.md           Detailed fresh-install and upgrade guide
 ```
 
 ## Security overview
 
 The project includes:
 
-- Supabase Row-Level Security for application rows
-- User-scoped database queries
-- Server-only service-role usage
-- HTTP-only signed admin session cookies
-- Cross-origin checks for admin mutations
-- Invitation-only user creation
-- URL and SSRF protections in external page fetchers
-- File type and size validation for resumes
+- Supabase Row-Level Security for applications and stages
+- immutable lifecycle history for normal users
+- user-scoped queries
+- server-only service-role usage
+- signed admin sessions
+- invitation-only user creation
+- URL/SSRF protections for job imports
+- PDF type and size validation for resumes
 - Content Security Policy and other security headers
-- Generic authentication errors to reduce account discovery
 
-Important deployment responsibilities:
+Deployment responsibilities include:
 
-- Use a long, unique admin password
-- Rotate the service-role key immediately if it is exposed
-- Keep `.env.local` out of Git
-- Do not log secret environment values
-- Review Supabase RLS and Storage policies before public use
-- Consider private resume storage with signed URLs for sensitive data
-- Add rate limiting to admin login, auth email actions, and AI import for larger public deployments
+- use a long unique admin password
+- keep `.env.local` out of Git
+- never expose the service-role key
+- review RLS/storage policies before public use
+- consider private resume storage for sensitive data
+- add rate limiting for larger public deployments
 
 ## Troubleshooting
 
-### `ADMIN_EMAIL is not configured`
+### Stage tracking says the schema is missing
 
-The variable is missing from the deployment currently serving the page. Check the exact Vercel environment—Preview or Production—and redeploy after saving it.
-
-### AI import returns only basic information
-
-Confirm `GROQ_API_KEY` is configured. Without it, the app uses page metadata. Also note that some job boards block server fetches or hide content behind JavaScript.
-
-### AI import fails for internal or local URLs
-
-This is intentional. The importer blocks localhost, private IP ranges, link-local addresses, and unsafe redirects.
-
-### Password-reset link signs in but does not show the reset form
-
-Check the Supabase redirect URLs, confirm the email template uses `{{ .ConfirmationURL }}`, deploy the latest code, and request a new reset email.
-
-### Company logo shows initials
-
-No reliable logo was found. Add `LOGO_DEV_PUBLISHABLE_KEY` for broader coverage, or extend the aliases in `app/api/company-logo/route.ts`.
+Run the complete `supabase/setup.sql` file in the Supabase SQL Editor. After it succeeds, refresh the application.
 
 ### Resume upload fails
 
-Confirm the `resumes` bucket exists, the user-folder storage policies are installed, the file is a PDF, and it is under 5 MB.
+Confirm `supabase/setup.sql` completed successfully, the `resumes` bucket exists, the user is authenticated, and the file is a PDF under 5 MB.
 
 ### Database request is denied
 
-Confirm Row-Level Security policies exist and the row's `user_id` matches the authenticated user's ID.
+Confirm Row-Level Security policies were created by `supabase/setup.sql` and that the row belongs to the authenticated user's `user_id`.
+
+### AI import returns limited information
+
+Confirm `GROQ_API_KEY` is set. Some job boards block automated requests or render content only with client-side JavaScript.
+
+### Password-reset link does not open the reset form
+
+Check Supabase redirect URLs, `NEXT_PUBLIC_SITE_URL`, and email templates using `{{ .ConfirmationURL }}`. Generate a new recovery email after changing settings.
 
 ## Useful commands
 
 ```bash
-npm run dev      # Start development server
-npm run build    # Create a production build
-npm run start    # Run the production build
-npm run lint     # Run ESLint
+npm run dev
+npm run build
+npm run start
+npm run lint
 ```
 
 ## Contributing
-
-Contributions are welcome.
 
 1. Fork the repository.
 2. Create a branch from `main`.
@@ -523,8 +390,8 @@ Contributions are welcome.
 4. Run `npm run lint` and `npm run build`.
 5. Open a focused pull request.
 
-Please avoid committing credentials, `.env.local`, private resumes, or production database exports.
+Do not commit credentials, `.env.local`, private resumes, or database exports.
 
 ## License
 
-No open-source license file is currently included. Until a license is added, standard copyright rules apply and reuse rights are not automatically granted.
+No open-source license file is currently included. Until one is added, standard copyright rules apply.
