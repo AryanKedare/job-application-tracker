@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Circle, Clock3, ListTree, Play, Plus, SkipForward, Trash2, XCircle } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Circle, Clock3, ListTree, Pencil, Play, Plus, Save, SkipForward, Trash2, X, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { ApplicationStage, ApplicationStageEvent, JobApplication } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,14 @@ interface Props {
   userId: string
   onChanged: () => void | Promise<void>
   onError: (message: string) => void
+}
+
+interface EditForm {
+  name: string
+  stage_type: string
+  state: ApplicationStage['state']
+  started_at: string
+  completed_at: string
 }
 
 const PRESETS = [
@@ -48,7 +56,8 @@ const EVENT_LABEL: Record<string, string> = {
   application_created: 'Application created', application_imported: 'Application imported into lifecycle',
   stage_added: 'Stage added', stage_started: 'Stage started', stage_completed: 'Stage completed',
   stage_skipped: 'Stage skipped', stage_rejected: 'Rejected at stage', stage_renamed: 'Stage renamed',
-  stage_reset: 'Stage reset', status_changed: 'Application status changed',
+  stage_edited: 'Stage details edited', stage_deleted: 'Stage deleted', stage_reset: 'Stage reset',
+  status_changed: 'Application status changed',
 }
 
 const stateTone: Record<ApplicationStage['state'], string> = {
@@ -57,10 +66,22 @@ const stateTone: Record<ApplicationStage['state'], string> = {
   rejected: 'text-red-300 border-red-500/40',
 }
 
+const EMPTY_EDIT_FORM: EditForm = { name: '', stage_type: 'custom', state: 'pending', started_at: '', completed_at: '' }
+
 function fmt(value?: string | null) {
   if (!value) return ''
   return new Date(value).toLocaleString('en-IE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
+
+function toLocalDateTime(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
+function toIso(value: string) { return value ? new Date(value).toISOString() : null }
+function isProgressed(state: ApplicationStage['state']) { return state !== 'pending' }
 
 export default function ApplicationLifecycleDialog({ open, setOpen, job, userId, onChanged, onError }: Props) {
   const [stages, setStages] = useState<ApplicationStage[]>([])
@@ -70,6 +91,9 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
   const [preset, setPreset] = useState('recruiter-screening')
   const [customName, setCustomName] = useState('')
   const [schemaMissing, setSchemaMissing] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT_FORM)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!open) return
@@ -92,6 +116,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
 
   useEffect(() => { void load() }, [load])
 
+  const orderedStages = useMemo(() => [...stages].sort((a, b) => a.position - b.position || (a.created_at ?? '').localeCompare(b.created_at ?? '')), [stages])
   const current = useMemo(() => stages.find((s) => s.state === 'current') ?? null, [stages])
   const rejected = useMemo(() => stages.filter((s) => s.state === 'rejected').sort((a, b) => new Date(b.completed_at ?? 0).getTime() - new Date(a.completed_at ?? 0).getTime())[0] ?? null, [stages])
   const terminal = job.status === 'Offer' || job.status === 'Rejected' || job.status === 'Ghosted'
@@ -129,14 +154,15 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
       const { error } = await supabase.from('application_stages').update({ state: 'current', started_at: stage.started_at ?? new Date().toISOString(), completed_at: null }).eq('id', stage.id).eq('user_id', userId)
       if (error) throw error
       await refresh()
-    } catch { onError('Failed to start this stage.'); await load() }
-    finally { setBusy(null) }
+    } catch {
+      onError('Failed to start this stage.')
+      await load()
+    } finally { setBusy(null) }
   }
 
   const move = async (stage: ApplicationStage, direction: -1 | 1) => {
-    const pending = stages.filter((s) => s.state === 'pending').sort((a, b) => a.position - b.position)
-    const i = pending.findIndex((s) => s.id === stage.id)
-    const other = pending[i + direction]
+    const i = orderedStages.findIndex((s) => s.id === stage.id)
+    const other = orderedStages[i + direction]
     if (!other) return
     setBusy(stage.id)
     const first = await supabase.from('application_stages').update({ position: other.position }).eq('id', stage.id).eq('user_id', userId)
@@ -146,16 +172,84 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     await refresh()
   }
 
-  const remove = async (stage: ApplicationStage) => {
-    if (stage.state !== 'pending') return
+  const beginEdit = (stage: ApplicationStage) => {
+    setDeleteConfirmId(null)
+    setEditingId(stage.id)
+    setEditForm({ name: stage.name, stage_type: stage.stage_type, state: stage.state, started_at: toLocalDateTime(stage.started_at), completed_at: toLocalDateTime(stage.completed_at) })
+  }
+
+  const cancelEdit = () => { setEditingId(null); setEditForm(EMPTY_EDIT_FORM) }
+
+  const saveEdit = async (stage: ApplicationStage) => {
+    const name = editForm.name.trim()
+    const stageType = editForm.stage_type.trim()
+    if (!name) return onError('Stage name cannot be empty.')
+    if (!stageType) return onError('Stage type cannot be empty.')
+
+    const anotherCurrent = stages.find((s) => s.id !== stage.id && s.state === 'current')
+    if (editForm.state === 'current' && anotherCurrent) return onError(`"${anotherCurrent.name}" is already the current stage.`)
+
+    let startedAt = toIso(editForm.started_at)
+    let completedAt = toIso(editForm.completed_at)
+    if (editForm.state === 'pending') { startedAt = null; completedAt = null }
+    else if (editForm.state === 'current') { startedAt = startedAt ?? stage.started_at ?? new Date().toISOString(); completedAt = null }
+    else { completedAt = completedAt ?? stage.completed_at ?? new Date().toISOString() }
+
+    if (startedAt && completedAt && new Date(completedAt).getTime() < new Date(startedAt).getTime()) return onError('Completed time cannot be before the started time.')
+
     setBusy(stage.id)
-    const { error } = await supabase.from('application_stages').delete().eq('id', stage.id).eq('user_id', userId)
+    const values: Partial<ApplicationStage> = { name, stage_type: stageType, state: editForm.state, started_at: startedAt, completed_at: completedAt }
+    const { error } = await supabase.from('application_stages').update(values).eq('id', stage.id).eq('user_id', userId)
+    if (error) { setBusy(null); return onError('Failed to save stage changes.') }
+
+    const corrected = stages.map((s) => s.id === stage.id ? ({ ...s, ...values } as ApplicationStage) : s)
+    if (editForm.state === 'rejected') {
+      await supabase.from('job_applications').update({ status: 'Rejected', rejected_stage_name: name, rejected_at: completedAt ?? new Date().toISOString() }).eq('id', job.id).eq('user_id', userId)
+    } else if (job.status === 'Rejected' && stage.state === 'rejected') {
+      const otherRejected = corrected.find((s) => s.state === 'rejected')
+      if (otherRejected) {
+        await supabase.from('job_applications').update({ rejected_stage_name: otherRejected.name, rejected_at: otherRejected.completed_at ?? new Date().toISOString() }).eq('id', job.id).eq('user_id', userId)
+      } else {
+        await supabase.from('job_applications').update({ status: corrected.some((s) => isProgressed(s.state)) ? 'Interviewing' : 'Applied', rejected_stage_name: null, rejected_at: null }).eq('id', job.id).eq('user_id', userId)
+      }
+    }
+
+    if (stage.stage_type !== stageType || stage.started_at !== startedAt || stage.completed_at !== completedAt) {
+      await supabase.from('application_stage_events').insert({ application_id: job.id, user_id: userId, event_type: 'stage_edited', stage_name_snapshot: name, notes: `Type: ${stageType}; state: ${editForm.state}; started: ${startedAt ?? 'none'}; completed: ${completedAt ?? 'none'}` })
+    }
+
     setBusy(null)
-    if (error) return onError('Failed to delete this stage.')
+    cancelEdit()
     await refresh()
   }
 
-  const lastLabel = (job.status === 'Rejected' ? rejected?.name : null) ?? current?.name ?? stages.filter((s) => s.state === 'completed').at(-1)?.name ?? 'No stages yet'
+  const remove = async (stage: ApplicationStage) => {
+    setBusy(stage.id)
+    const history = await supabase.from('application_stage_events').insert({ application_id: job.id, user_id: userId, event_type: 'stage_deleted', stage_name_snapshot: stage.name, notes: `Deleted stage that was ${stage.state}.` })
+    if (history.error) { setBusy(null); return onError('Failed to preserve the stage deletion in lifecycle history.') }
+
+    const { error } = await supabase.from('application_stages').delete().eq('id', stage.id).eq('user_id', userId)
+    if (error) { setBusy(null); return onError('Failed to delete this stage.') }
+
+    const remaining = stages.filter((s) => s.id !== stage.id)
+    if (stage.state === 'rejected' && job.status === 'Rejected') {
+      const otherRejected = remaining.find((s) => s.state === 'rejected')
+      if (otherRejected) {
+        await supabase.from('job_applications').update({ rejected_stage_name: otherRejected.name, rejected_at: otherRejected.completed_at ?? new Date().toISOString() }).eq('id', job.id).eq('user_id', userId)
+      } else {
+        await supabase.from('job_applications').update({ status: remaining.some((s) => isProgressed(s.state)) ? 'Interviewing' : 'Applied', rejected_stage_name: null, rejected_at: null }).eq('id', job.id).eq('user_id', userId)
+      }
+    } else if (stage.state === 'current' && job.status === 'Interviewing' && !remaining.some((s) => isProgressed(s.state))) {
+      await supabase.from('job_applications').update({ status: 'Applied' }).eq('id', job.id).eq('user_id', userId)
+    }
+
+    setBusy(null)
+    setDeleteConfirmId(null)
+    if (editingId === stage.id) cancelEdit()
+    await refresh()
+  }
+
+  const lastLabel = (job.status === 'Rejected' ? rejected?.name : null) ?? current?.name ?? orderedStages.filter((s) => s.state === 'completed').at(-1)?.name ?? 'No stages yet'
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -171,27 +265,41 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
           </div>
 
           <section className="space-y-3">
-            <div><h3 className="font-semibold">Interview & assessment stages</h3><p className="text-xs text-slate-500">Add unlimited named rounds. Complete a round, then explicitly start the next one so the history stays accurate.</p></div>
-            {stages.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">No stages yet.</div> : <div className="space-y-2">{stages.map((stage, index) => {
-              const pending = stages.filter((s) => s.state === 'pending').sort((a, b) => a.position - b.position)
-              const pi = pending.findIndex((s) => s.id === stage.id)
-              return <div key={stage.id} className={`rounded-xl border p-4 ${stateTone[stage.state]}`}>
-                <div className="flex gap-3"><Circle className="h-5 w-5 flex-shrink-0 mt-0.5" /><div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap"><span className="font-semibold text-slate-100">{stage.name}</span><span className="text-[10px] uppercase rounded-full border px-2 py-0.5">{stage.state}</span><span className="text-xs text-slate-600">#{index + 1}</span></div>
-                  <div className="text-xs text-slate-500 mt-1">{stage.started_at && <>Started {fmt(stage.started_at)}</>}{stage.started_at && stage.completed_at && ' · '}{stage.completed_at && <>Finished {fmt(stage.completed_at)}</>}</div>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {stage.state === 'pending' && <><Button size="sm" disabled={busy === stage.id || terminal} onClick={() => void start(stage)} className="h-8 bg-blue-600"><Play className="h-3.5 w-3.5 mr-1" />Start</Button><Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'skipped', completed_at: new Date().toISOString() }, 'Failed to skip stage.')} className="h-8 border-slate-700"><SkipForward className="h-3.5 w-3.5 mr-1" />Skip</Button><Button size="icon" variant="outline" disabled={pi <= 0} onClick={() => void move(stage, -1)} className="h-8 w-8 border-slate-700"><ArrowUp className="h-3.5 w-3.5" /></Button><Button size="icon" variant="outline" disabled={pi < 0 || pi >= pending.length - 1} onClick={() => void move(stage, 1)} className="h-8 w-8 border-slate-700"><ArrowDown className="h-3.5 w-3.5" /></Button><Button size="icon" variant="outline" onClick={() => void remove(stage)} className="h-8 w-8 border-slate-700 text-red-300"><Trash2 className="h-3.5 w-3.5" /></Button></>}
-                    {stage.state === 'current' && <><Button size="sm" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'completed', completed_at: new Date().toISOString() }, 'Failed to complete stage.')} className="h-8 bg-emerald-600"><Check className="h-3.5 w-3.5 mr-1" />Complete</Button><Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'rejected', completed_at: new Date().toISOString() }, 'Failed to record rejection.')} className="h-8 border-red-500/40 text-red-300"><XCircle className="h-3.5 w-3.5 mr-1" />Reject here</Button></>}
-                    {stage.state === 'completed' && !terminal && !current && <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'rejected', completed_at: new Date().toISOString() }, 'Failed to record rejection.')} className="h-8 border-red-500/40 text-red-300"><XCircle className="h-3.5 w-3.5 mr-1" />Rejected after this stage</Button>}
+            <div><h3 className="font-semibold">Interview & assessment stages</h3><p className="text-xs text-slate-500">Every stage can be renamed, retyped, reordered, corrected, or deleted. Existing history stays preserved as snapshots.</p></div>
+            {orderedStages.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">No stages yet.</div> : <div className="space-y-2">{orderedStages.map((stage, index) => <div key={stage.id} className={`rounded-xl border p-4 ${stateTone[stage.state]}`}>
+              <div className="flex gap-3"><Circle className="h-5 w-5 flex-shrink-0 mt-0.5" /><div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap"><span className="font-semibold text-slate-100">{stage.name}</span><span className="text-[10px] uppercase rounded-full border px-2 py-0.5">{stage.state}</span><span className="text-xs text-slate-600">#{index + 1}</span><span className="text-[10px] text-slate-600">{stage.stage_type}</span></div>
+                <div className="text-xs text-slate-500 mt-1">{stage.started_at && <>Started {fmt(stage.started_at)}</>}{stage.started_at && stage.completed_at && ' · '}{stage.completed_at && <>Finished {fmt(stage.completed_at)}</>}</div>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {stage.state === 'pending' && <><Button size="sm" disabled={busy === stage.id || terminal} onClick={() => void start(stage)} className="h-8 bg-blue-600"><Play className="h-3.5 w-3.5 mr-1" />Start</Button><Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'skipped', completed_at: new Date().toISOString() }, 'Failed to skip stage.')} className="h-8 border-slate-700"><SkipForward className="h-3.5 w-3.5 mr-1" />Skip</Button></>}
+                  {stage.state === 'current' && <><Button size="sm" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'completed', completed_at: new Date().toISOString() }, 'Failed to complete stage.')} className="h-8 bg-emerald-600"><Check className="h-3.5 w-3.5 mr-1" />Complete</Button><Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'rejected', completed_at: new Date().toISOString() }, 'Failed to record rejection.')} className="h-8 border-red-500/40 text-red-300"><XCircle className="h-3.5 w-3.5 mr-1" />Reject here</Button></>}
+                  {stage.state === 'completed' && !terminal && !current && <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => void updateStage(stage, { state: 'rejected', completed_at: new Date().toISOString() }, 'Failed to record rejection.')} className="h-8 border-red-500/40 text-red-300"><XCircle className="h-3.5 w-3.5 mr-1" />Rejected after this stage</Button>}
+                  <Button size="icon" variant="outline" disabled={busy === stage.id || index === 0} onClick={() => void move(stage, -1)} className="h-8 w-8 border-slate-700"><ArrowUp className="h-3.5 w-3.5" /></Button>
+                  <Button size="icon" variant="outline" disabled={busy === stage.id || index === orderedStages.length - 1} onClick={() => void move(stage, 1)} className="h-8 w-8 border-slate-700"><ArrowDown className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => beginEdit(stage)} className="h-8 border-slate-700"><Pencil className="h-3.5 w-3.5 mr-1" />Edit</Button>
+                  <Button size="sm" variant="outline" disabled={busy === stage.id} onClick={() => { setDeleteConfirmId(stage.id); if (editingId === stage.id) cancelEdit() }} className="h-8 border-red-500/30 text-red-300"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete</Button>
+                </div>
+
+                {editingId === stage.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-4 text-slate-100">
+                  <div className="flex items-center justify-between gap-3"><div><div className="font-semibold">Edit stage</div><div className="text-xs text-slate-500">Correct the name, type, state, or timestamps.</div></div><Button size="icon" variant="ghost" onClick={cancelEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5"><Label>Stage name</Label><Input value={editForm.name} maxLength={200} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} className="bg-slate-900 border-slate-700" /></div>
+                    <div className="space-y-1.5"><Label>Stage type</Label><Input value={editForm.stage_type} maxLength={80} onChange={(e) => setEditForm((f) => ({ ...f, stage_type: e.target.value }))} placeholder="interview, coding, assessment…" className="bg-slate-900 border-slate-700" /></div>
+                    <div className="space-y-1.5"><Label>State</Label><Select value={editForm.state} onValueChange={(value) => setEditForm((f) => ({ ...f, state: value as ApplicationStage['state'] }))}><SelectTrigger className="bg-slate-900 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-900 border-slate-700"><SelectItem value="pending">Pending</SelectItem><SelectItem value="current">Current</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="skipped">Skipped</SelectItem><SelectItem value="rejected">Rejected</SelectItem></SelectContent></Select></div><div />
+                    <div className="space-y-1.5"><Label>Started at</Label><Input type="datetime-local" value={editForm.started_at} disabled={editForm.state === 'pending'} onChange={(e) => setEditForm((f) => ({ ...f, started_at: e.target.value }))} className="bg-slate-900 border-slate-700" /></div>
+                    <div className="space-y-1.5"><Label>Completed at</Label><Input type="datetime-local" value={editForm.completed_at} disabled={editForm.state === 'pending' || editForm.state === 'current'} onChange={(e) => setEditForm((f) => ({ ...f, completed_at: e.target.value }))} className="bg-slate-900 border-slate-700" /></div>
                   </div>
-                </div></div>
-              </div>
-            })}</div>}
+                  <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={cancelEdit} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === stage.id} onClick={() => void saveEdit(stage)} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Save changes</Button></div>
+                </div>}
+
+                {deleteConfirmId === stage.id && <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-slate-100"><div className="font-semibold text-red-200">Delete “{stage.name}”?</div><p className="text-xs text-slate-400 mt-1">The stage will be removed even if it is current, completed, skipped, or rejected. Existing lifecycle events remain in history.</p><div className="flex justify-end gap-2 mt-3"><Button size="sm" variant="outline" onClick={() => setDeleteConfirmId(null)} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === stage.id} onClick={() => void remove(stage)} className="bg-red-600 hover:bg-red-700 text-white"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete stage</Button></div></div>}
+              </div></div>
+            </div>)}</div>}
 
             <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-3"><div className="font-medium flex items-center gap-2"><Plus className="h-4 w-4 text-blue-400" />Add stage</div><div className="grid sm:grid-cols-[1fr_1fr_auto] gap-3 sm:items-end"><div className="space-y-1.5"><Label>Template</Label><Select value={preset} onValueChange={setPreset}><SelectTrigger className="bg-slate-900 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-900 border-slate-700">{PRESETS.map((p) => <SelectItem key={p[0]} value={p[0]}>{p[1]}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label>Custom name</Label><Input value={customName} onChange={(e) => setCustomName(e.target.value)} disabled={preset !== 'custom'} maxLength={200} placeholder="e.g. VP Engineering Interview" className="bg-slate-900 border-slate-700" /></div><Button disabled={busy === 'add' || (preset === 'custom' && !customName.trim())} onClick={() => void addStage()} className="bg-blue-600"><Plus className="h-4 w-4 mr-1" />Add</Button></div></div>
           </section>
 
-          <section className="space-y-3"><div><h3 className="font-semibold">Lifecycle history</h3><p className="text-xs text-slate-500">Event snapshots preserve how the application progressed and where it ended.</p></div>{events.length === 0 ? <div className="text-sm text-slate-500">No lifecycle events yet.</div> : <div className="space-y-2">{events.map((event) => <div key={event.id} className="flex gap-3 rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2.5"><Clock3 className="h-4 w-4 mt-0.5 text-slate-500" /><div><div className="text-sm">{EVENT_LABEL[event.event_type] ?? event.event_type.replaceAll('_', ' ')}{event.stage_name_snapshot && <b> · {event.stage_name_snapshot}</b>}</div>{event.from_status && event.to_status && <div className="text-xs text-slate-500">{event.from_status} → {event.to_status}</div>}{event.notes && <div className="text-xs text-slate-500">{event.notes}</div>}<div className="text-[11px] text-slate-600">{fmt(event.occurred_at)}</div></div></div>)}</div>}</section>
+          <section className="space-y-3"><div><h3 className="font-semibold">Lifecycle history</h3><p className="text-xs text-slate-500">Event snapshots preserve how the application progressed, including edits and deletions.</p></div>{events.length === 0 ? <div className="text-sm text-slate-500">No lifecycle events yet.</div> : <div className="space-y-2">{events.map((event) => <div key={event.id} className="flex gap-3 rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2.5"><Clock3 className="h-4 w-4 mt-0.5 text-slate-500" /><div><div className="text-sm">{EVENT_LABEL[event.event_type] ?? event.event_type.replaceAll('_', ' ')}{event.stage_name_snapshot && <b> · {event.stage_name_snapshot}</b>}</div>{event.from_status && event.to_status && <div className="text-xs text-slate-500">{event.from_status} → {event.to_status}</div>}{event.notes && <div className="text-xs text-slate-500">{event.notes}</div>}<div className="text-[11px] text-slate-600">{fmt(event.occurred_at)}</div></div></div>)}</div>}</section>
         </div>}
       </DialogContent>
     </Dialog>
