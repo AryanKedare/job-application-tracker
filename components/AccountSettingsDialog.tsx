@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { JobApplication } from '@/lib/types'
+import { ApplicationStage, JobApplication } from '@/lib/types'
 import {
   Dialog,
   DialogContent,
@@ -26,22 +26,77 @@ interface Props {
   onDataDeleted: () => void
 }
 
-function exportToCSV(jobs: JobApplication[]) {
+type ExportStage = Pick<ApplicationStage, 'application_id' | 'name' | 'position' | 'state' | 'started_at' | 'completed_at' | 'created_at'>
+
+function formatStageTime(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  const pad = (number: number) => String(number).padStart(2, '0')
+  const hours24 = date.getHours()
+  const hours12 = hours24 % 12 || 12
+  const period = hours24 >= 12 ? 'PM' : 'AM'
+
+  return `${pad(hours12)}:${pad(date.getMinutes())} ${period} ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
+}
+
+function formatLifecycleStage(stage: ExportStage) {
+  const timestamps = [
+    stage.started_at ? `started ${formatStageTime(stage.started_at)}` : '',
+    stage.completed_at ? `finished ${formatStageTime(stage.completed_at)}` : '',
+  ].filter(Boolean).join('; ')
+
+  return `${stage.name} [${stage.state}]${timestamps ? ` (${timestamps})` : ''}`
+}
+
+function currentOrLastStage(stages: ExportStage[]) {
+  return stages.find((stage) => stage.state === 'current')?.name
+    ?? [...stages].reverse().find((stage) => stage.state !== 'pending')?.name
+    ?? stages[0]?.name
+    ?? ''
+}
+
+async function exportToCSV(jobs: JobApplication[], userId: string) {
+  const { data, error } = await supabase
+    .from('application_stages')
+    .select('application_id,name,position,state,started_at,completed_at,created_at')
+    .eq('user_id', userId)
+    .order('position')
+    .order('created_at')
+
+  if (error) throw error
+
+  const stagesByApplication = new Map<string, ExportStage[]>()
+  for (const stage of (data ?? []) as ExportStage[]) {
+    const stages = stagesByApplication.get(stage.application_id) ?? []
+    stages.push(stage)
+    stagesByApplication.set(stage.application_id, stages)
+  }
+
   const headers = [
     'Company', 'Role', 'Location', 'Status',
+    'Current / Last Stage', 'Application Lifecycle',
     'Date Applied', 'Job Link', 'Resume URL', 'Source', 'Notes',
   ]
-  const rows = jobs.map((j) => [
-    j.company ?? '',
-    j.job_title ?? '',
-    j.location ?? '',
-    j.status ?? '',
-    j.date_applied ?? '',
-    j.job_link ?? '',
-    j.resume_url ?? '',
-    j.source ?? '',
-    (j.notes ?? '').replace(/\n/g, ' | '),
-  ])
+  const rows = jobs.map((j) => {
+    const stages = (stagesByApplication.get(j.id) ?? [])
+      .sort((a, b) => a.position - b.position || (a.created_at ?? '').localeCompare(b.created_at ?? ''))
+
+    return [
+      j.company ?? '',
+      j.job_title ?? '',
+      j.location ?? '',
+      j.status ?? '',
+      currentOrLastStage(stages),
+      stages.map(formatLifecycleStage).join(' → '),
+      j.date_applied ?? '',
+      j.job_link ?? '',
+      j.resume_url ?? '',
+      j.source ?? '',
+      (j.notes ?? '').replace(/\n/g, ' | '),
+    ]
+  })
 
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
   const csvContent = [
@@ -64,9 +119,24 @@ export default function AccountSettingsDialog({
   const [deletePhase, setDeletePhase] = useState<'idle' | 'confirm' | 'deleting' | 'done'>('idle')
   const [confirmInput, setConfirmInput] = useState('')
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const CONFIRM_PHRASE = 'delete my data'
   const canConfirm = confirmInput.trim().toLowerCase() === CONFIRM_PHRASE
+
+  const handleExport = async () => {
+    setExporting(true)
+    setExportError(null)
+    try {
+      await exportToCSV(jobs, userId)
+    } catch (error) {
+      console.error('CSV export error:', error)
+      setExportError('Could not export your applications. Please try again.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const handleDeleteAll = async () => {
     if (!canConfirm) return
@@ -170,17 +240,18 @@ export default function AccountSettingsDialog({
                 <p className="text-sm font-medium text-slate-200">Export to CSV</p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Downloads all {jobs.length} application{jobs.length !== 1 ? 's' : ''} as a spreadsheet.
-                  Includes company, role, status, dates, job links, and resume URLs.
+                  Includes company, role, status, lifecycle stages, dates, job links, and resume URLs.
                 </p>
               </div>
+              {exportError && <p className="text-xs text-red-400">{exportError}</p>}
               <Button
-                onClick={() => exportToCSV(jobs)}
-                disabled={jobs.length === 0}
+                onClick={() => void handleExport()}
+                disabled={jobs.length === 0 || exporting}
                 size="sm"
                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
               >
                 <Download className="w-3.5 h-3.5 mr-1.5" />
-                Download CSV ({jobs.length} rows)
+                {exporting ? 'Preparing CSV…' : `Download CSV (${jobs.length} rows)`}
               </Button>
             </div>
           </section>
