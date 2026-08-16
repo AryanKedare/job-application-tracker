@@ -1,7 +1,8 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 
 export const ADMIN_COOKIE_NAME = 'job-tracker-admin-session'
 export const ADMIN_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+export const INVITE_CODE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 type AdminSessionPayload = { email: string; expiresAt: number }
 
@@ -24,6 +25,7 @@ export function verifyAdminCredentials(email: string, password: string): boolean
 }
 
 const sign = (payload: string) => createHmac('sha256', sessionSecret()).update(payload).digest('base64url')
+const signInvite = (payload: string) => createHmac('sha256', sessionSecret()).update(`invite:${payload}`).digest('hex').slice(0, 16).toUpperCase()
 
 export function createAdminSessionToken(email: string): string {
   const payload: AdminSessionPayload = {
@@ -46,6 +48,30 @@ export function verifyAdminSessionToken(token: string | undefined): boolean {
   } catch {
     return false
   }
+}
+
+export function createInviteCode(): { code: string; expiresAt: number } {
+  if (sessionSecret().length < 32) throw new Error('ADMIN_SESSION_SECRET must contain at least 32 characters.')
+  const expiresAt = Date.now() + INVITE_CODE_MAX_AGE_SECONDS * 1000
+  const expiryToken = Math.floor(expiresAt / 1000).toString(36).toUpperCase()
+  const nonce = randomBytes(6).toString('hex').toUpperCase()
+  const payload = `${expiryToken}.${nonce}`
+  return {
+    code: `JT-${expiryToken}-${nonce}-${signInvite(payload)}`,
+    expiresAt,
+  }
+}
+
+export function verifyInviteCode(value: string): boolean {
+  if (sessionSecret().length < 32) return false
+  const normalized = value.trim().toUpperCase()
+  const [prefix, expiryToken, nonce, suppliedSignature, extra] = normalized.split('-')
+  if (prefix !== 'JT' || !expiryToken || !nonce || !suppliedSignature || extra) return false
+  if (!/^[0-9A-Z]+$/.test(expiryToken) || !/^[0-9A-F]{12}$/.test(nonce) || !/^[0-9A-F]{16}$/.test(suppliedSignature)) return false
+
+  const expiresAt = Number.parseInt(expiryToken, 36) * 1000
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false
+  return safeEqual(suppliedSignature, signInvite(`${expiryToken}.${nonce}`))
 }
 
 export const adminCookieOptions = {
