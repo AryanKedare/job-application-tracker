@@ -55,6 +55,7 @@ The admin portal can:
 - show active users and average jobs per user
 - search users
 - invite new users by name/email
+- generate invite codes for self-service onboarding
 - edit a user's name or email
 - send password-recovery emails
 - send magic links
@@ -63,7 +64,32 @@ The admin portal can:
 
 Deleting a job application also cascades its interview stages and lifecycle event records through the database relationships configured in `supabase/setup.sql`.
 
-## 4. Security notes
+## 4. Maintenance mode
+
+The app includes a dedicated maintenance page for planned upgrades and improvements.
+
+To enable it, add or change this server-side environment variable in Vercel and redeploy:
+
+```env
+MAINTENANCE_MODE=true
+```
+
+While maintenance mode is enabled:
+
+- normal user-facing routes display the maintenance page
+- non-admin API requests return HTTP `503 Service Unavailable`
+- `/admin` and `/api/admin/*` remain available so administrators can continue working
+- Next.js static assets remain available so the maintenance page renders normally
+
+To restore normal access, set the variable to `false` (or remove it) and redeploy:
+
+```env
+MAINTENANCE_MODE=false
+```
+
+`MAINTENANCE_MODE` is intentionally server-side and should not use the `NEXT_PUBLIC_` prefix.
+
+## 5. Security notes
 
 - Use a long, unique admin password.
 - Keep the service-role key out of browser code and client logs.
