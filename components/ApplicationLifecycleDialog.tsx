@@ -342,7 +342,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     setBusy(null)
     if (error) return onError('Failed to delete lifecycle history. Re-run supabase/setup.sql if this database has not been upgraded.')
     if (eventEditingId === event.id) cancelEventEdit()
-    await load()
+    setEvents((currentEvents) => currentEvents.filter((item) => item.id !== event.id))
   }
 
   const lastLabel = (job.status === 'Rejected' ? rejected?.name : null) ?? current?.name ?? orderedStages.filter((s) => s.state === 'completed').at(-1)?.name ?? 'No stages yet'
