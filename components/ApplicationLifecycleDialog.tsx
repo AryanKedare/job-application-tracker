@@ -1,9 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Circle, Clock3, ListTree, Pencil, Play, Plus, Save, SkipForward, Trash2, X, XCircle } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Circle, ListTree, Pencil, Play, Plus, Save, SkipForward, Trash2, X, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { ApplicationStage, ApplicationStageEvent, JobApplication } from '@/lib/types'
+import { ApplicationStage, JobApplication } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -26,30 +26,6 @@ interface EditForm {
   started_at: string
   completed_at: string
 }
-
-interface EventForm {
-  event_type: string
-  stage_id: string
-  stage_name_snapshot: string
-  from_status: string
-  to_status: string
-  notes: string
-  occurred_at: string
-}
-
-interface EventPayload {
-  event_type: string
-  stage_id: string | null
-  stage_name_snapshot: string | null
-  from_status: string | null
-  to_status: string | null
-  notes: string | null
-  occurred_at: string
-}
-
-type EventPayloadResult =
-  | { ok: false; error: string }
-  | { ok: true; value: EventPayload }
 
 const PRESETS = [
   ['recruiter-screening', 'Recruiter Screening', 'screening'],
@@ -76,24 +52,15 @@ const PRESETS = [
   ['custom', 'Custom stage…', 'custom'],
 ] as const
 
-const STATUS_OPTIONS: JobApplication['status'][] = ['Bookmarked', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Ghosted']
-
-const EVENT_LABEL: Record<string, string> = {
-  application_created: 'Application created', application_imported: 'Application imported into lifecycle',
-  stage_added: 'Stage added', stage_started: 'Stage started', stage_completed: 'Stage completed',
-  stage_skipped: 'Stage skipped', stage_rejected: 'Rejected at stage', stage_renamed: 'Stage renamed',
-  stage_edited: 'Stage details edited', stage_deleted: 'Stage deleted', stage_reset: 'Stage reset',
-  status_changed: 'Application status changed', manual_note: 'Manual history entry',
-}
-
 const stateTone: Record<ApplicationStage['state'], string> = {
-  pending: 'text-slate-400 border-slate-700', current: 'text-yellow-300 border-yellow-500/40',
-  completed: 'text-emerald-300 border-emerald-500/40', skipped: 'text-slate-500 border-slate-700',
+  pending: 'text-slate-400 border-slate-700',
+  current: 'text-yellow-300 border-yellow-500/40',
+  completed: 'text-emerald-300 border-emerald-500/40',
+  skipped: 'text-slate-500 border-slate-700',
   rejected: 'text-red-300 border-red-500/40',
 }
 
 const EMPTY_EDIT_FORM: EditForm = { name: '', stage_type: 'custom', state: 'pending', started_at: '', completed_at: '' }
-const EMPTY_EVENT_FORM: EventForm = { event_type: 'manual_note', stage_id: '', stage_name_snapshot: '', from_status: '', to_status: '', notes: '', occurred_at: '' }
 
 function fmt(value?: string | null) {
   if (!value) return ''
@@ -109,11 +76,9 @@ function toLocalDateTime(value?: string | null) {
 
 function toIso(value: string) { return value ? new Date(value).toISOString() : null }
 function isProgressed(state: ApplicationStage['state']) { return state !== 'pending' }
-function newEventForm(): EventForm { return { ...EMPTY_EVENT_FORM, occurred_at: toLocalDateTime(new Date().toISOString()) } }
 
 export default function ApplicationLifecycleDialog({ open, setOpen, job, userId, onChanged, onError }: Props) {
   const [stages, setStages] = useState<ApplicationStage[]>([])
-  const [events, setEvents] = useState<ApplicationStageEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [preset, setPreset] = useState('recruiter-screening')
@@ -121,26 +86,24 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
   const [schemaMissing, setSchemaMissing] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT_FORM)
-  const [eventEditingId, setEventEditingId] = useState<string | null>(null)
-  const [eventEditForm, setEventEditForm] = useState<EventForm>(EMPTY_EVENT_FORM)
-  const [addingEvent, setAddingEvent] = useState(false)
-  const [addEventForm, setAddEventForm] = useState<EventForm>(EMPTY_EVENT_FORM)
 
   const load = useCallback(async () => {
     if (!open) return
     setLoading(true)
     setSchemaMissing(false)
-    const [s, e] = await Promise.all([
-      supabase.from('application_stages').select('*').eq('application_id', job.id).eq('user_id', userId).order('position').order('created_at'),
-      supabase.from('application_stage_events').select('*').eq('application_id', job.id).eq('user_id', userId).order('occurred_at', { ascending: false }).limit(100),
-    ])
-    const error = s.error ?? e.error
+    const { data, error } = await supabase
+      .from('application_stages')
+      .select('*')
+      .eq('application_id', job.id)
+      .eq('user_id', userId)
+      .order('position')
+      .order('created_at')
+
     if (error) {
       setSchemaMissing(error.code === '42P01' || error.code === 'PGRST205')
       if (error.code !== '42P01' && error.code !== 'PGRST205') onError('Failed to load the application lifecycle.')
     } else {
-      setStages((s.data ?? []) as ApplicationStage[])
-      setEvents((e.data ?? []) as ApplicationStageEvent[])
+      setStages((data ?? []) as ApplicationStage[])
     }
     setLoading(false)
   }, [job.id, onError, open, userId])
@@ -188,7 +151,9 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     } catch {
       onError('Failed to start this stage.')
       await load()
-    } finally { setBusy(null) }
+    } finally {
+      setBusy(null)
+    }
   }
 
   const move = async (stage: ApplicationStage, direction: -1 | 1) => {
@@ -244,10 +209,6 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
       }
     }
 
-    if (stage.stage_type !== stageType || stage.started_at !== startedAt || stage.completed_at !== completedAt) {
-      await supabase.from('application_stage_events').insert({ application_id: job.id, user_id: userId, event_type: 'stage_edited', stage_name_snapshot: name, notes: `Type: ${stageType}; state: ${editForm.state}; started: ${startedAt ?? 'none'}; completed: ${completedAt ?? 'none'}` })
-    }
-
     setBusy(null)
     cancelEdit()
     await refresh()
@@ -255,9 +216,6 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
 
   const remove = async (stage: ApplicationStage) => {
     setBusy(stage.id)
-    const history = await supabase.from('application_stage_events').insert({ application_id: job.id, user_id: userId, event_type: 'stage_deleted', stage_name_snapshot: stage.name, notes: `Deleted stage that was ${stage.state}.` })
-    if (history.error) { setBusy(null); return onError('Failed to preserve the stage deletion in lifecycle history.') }
-
     const { error } = await supabase.from('application_stages').delete().eq('id', stage.id).eq('user_id', userId)
     if (error) { setBusy(null); return onError('Failed to delete this stage.') }
 
@@ -278,91 +236,15 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     await refresh()
   }
 
-  const beginEventEdit = (event: ApplicationStageEvent) => {
-    setAddingEvent(false)
-    setEventEditingId(event.id)
-    setEventEditForm({
-      event_type: event.event_type,
-      stage_id: event.stage_id ?? '',
-      stage_name_snapshot: event.stage_name_snapshot ?? '',
-      from_status: event.from_status ?? '',
-      to_status: event.to_status ?? '',
-      notes: event.notes ?? '',
-      occurred_at: toLocalDateTime(event.occurred_at),
-    })
-  }
-
-  const cancelEventEdit = () => { setEventEditingId(null); setEventEditForm(EMPTY_EVENT_FORM) }
-
-  const eventPayload = (form: EventForm): EventPayloadResult => {
-    const eventType = form.event_type.trim()
-    const occurredAt = toIso(form.occurred_at)
-    if (!eventType) return { ok: false, error: 'History event type cannot be empty.' }
-    if (!occurredAt) return { ok: false, error: 'History event date/time is required.' }
-    return {
-      ok: true,
-      value: {
-        event_type: eventType,
-        stage_id: form.stage_id || null,
-        stage_name_snapshot: form.stage_name_snapshot.trim() || null,
-        from_status: form.from_status || null,
-        to_status: form.to_status || null,
-        notes: form.notes.trim() || null,
-        occurred_at: occurredAt,
-      },
-    }
-  }
-
-  const saveEventEdit = async (event: ApplicationStageEvent) => {
-    const payload = eventPayload(eventEditForm)
-    if (!payload.ok) return onError(payload.error)
-    setBusy(`event-${event.id}`)
-    const { error } = await supabase.from('application_stage_events').update(payload.value).eq('id', event.id).eq('application_id', job.id).eq('user_id', userId)
-    setBusy(null)
-    if (error) return onError('Failed to update lifecycle history. Re-run supabase/setup.sql if this database has not been upgraded.')
-    cancelEventEdit()
-    await load()
-  }
-
-  const addHistoryEvent = async () => {
-    const payload = eventPayload(addEventForm)
-    if (!payload.ok) return onError(payload.error)
-    setBusy('event-add')
-    const { error } = await supabase.from('application_stage_events').insert({ application_id: job.id, user_id: userId, ...payload.value })
-    setBusy(null)
-    if (error) return onError('Failed to add lifecycle history.')
-    setAddingEvent(false)
-    setAddEventForm(EMPTY_EVENT_FORM)
-    await load()
-  }
-
-  const removeEvent = async (event: ApplicationStageEvent) => {
-    setBusy(`event-${event.id}`)
-    const { error } = await supabase.from('application_stage_events').delete().eq('id', event.id).eq('application_id', job.id).eq('user_id', userId)
-    setBusy(null)
-    if (error) return onError('Failed to delete lifecycle history. Re-run supabase/setup.sql if this database has not been upgraded.')
-    if (eventEditingId === event.id) cancelEventEdit()
-    setEvents((currentEvents) => currentEvents.filter((item) => item.id !== event.id))
-  }
-
   const lastLabel = (job.status === 'Rejected' ? rejected?.name : null) ?? current?.name ?? orderedStages.filter((s) => s.state === 'completed').at(-1)?.name ?? 'No stages yet'
-
-  const renderEventForm = (form: EventForm, setForm: (value: EventForm | ((current: EventForm) => EventForm)) => void) => (
-    <div className="grid sm:grid-cols-2 gap-3">
-      <div className="space-y-1.5"><Label>Event type</Label><Input value={form.event_type} maxLength={80} onChange={(e) => setForm((f) => ({ ...f, event_type: e.target.value }))} placeholder="e.g. stage_completed" className="bg-slate-900 border-slate-700" /></div>
-      <div className="space-y-1.5"><Label>Linked stage</Label><Select value={form.stage_id || 'none'} onValueChange={(value) => setForm((f) => ({ ...f, stage_id: value === 'none' ? '' : value }))}><SelectTrigger className="bg-slate-900 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-900 border-slate-700"><SelectItem value="none">No linked stage</SelectItem>{orderedStages.map((stage) => <SelectItem key={stage.id} value={stage.id}>{stage.name}</SelectItem>)}</SelectContent></Select></div>
-      <div className="space-y-1.5"><Label>Stage snapshot</Label><Input value={form.stage_name_snapshot} onChange={(e) => setForm((f) => ({ ...f, stage_name_snapshot: e.target.value }))} placeholder="Stage name shown in history" className="bg-slate-900 border-slate-700" /></div>
-      <div className="space-y-1.5"><Label>Occurred at</Label><Input type="datetime-local" value={form.occurred_at} onChange={(e) => setForm((f) => ({ ...f, occurred_at: e.target.value }))} className="bg-slate-900 border-slate-700" /></div>
-      <div className="space-y-1.5"><Label>From status</Label><Select value={form.from_status || 'none'} onValueChange={(value) => setForm((f) => ({ ...f, from_status: value === 'none' ? '' : value }))}><SelectTrigger className="bg-slate-900 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-900 border-slate-700"><SelectItem value="none">None</SelectItem>{STATUS_OPTIONS.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>
-      <div className="space-y-1.5"><Label>To status</Label><Select value={form.to_status || 'none'} onValueChange={(value) => setForm((f) => ({ ...f, to_status: value === 'none' ? '' : value }))}><SelectTrigger className="bg-slate-900 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-900 border-slate-700"><SelectItem value="none">None</SelectItem>{STATUS_OPTIONS.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>
-      <div className="space-y-1.5 sm:col-span-2"><Label>Notes</Label><textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={3} className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-blue-500" placeholder="Optional history notes" /></div>
-    </div>
-  )
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-slate-900 border-slate-700 text-slate-100">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><ListTree className="h-5 w-5 text-blue-400" />{job.job_title} lifecycle</DialogTitle><p className="text-sm text-slate-400">{job.company || 'Unknown company'} · {job.status}</p></DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><ListTree className="h-5 w-5 text-blue-400" />{job.job_title} lifecycle</DialogTitle>
+          <p className="text-sm text-slate-400">{job.company || 'Unknown company'} · {job.status}</p>
+        </DialogHeader>
 
         {schemaMissing ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">Run <span className="font-mono">supabase/setup.sql</span> in the Supabase SQL Editor before using stage tracking.</div>
         : loading ? <div className="py-16 flex justify-center"><div className="h-7 w-7 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" /></div>
@@ -403,22 +285,6 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
             </div>)}</div>}
 
             <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-3"><div className="font-medium flex items-center gap-2"><Plus className="h-4 w-4 text-blue-400" />Add stage</div><div className="grid sm:grid-cols-[1fr_1fr_auto] gap-3 sm:items-end"><div className="space-y-1.5"><Label>Template</Label><Select value={preset} onValueChange={setPreset}><SelectTrigger className="bg-slate-900 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-900 border-slate-700">{PRESETS.map((p) => <SelectItem key={p[0]} value={p[0]}>{p[1]}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label>Custom name</Label><Input value={customName} onChange={(e) => setCustomName(e.target.value)} disabled={preset !== 'custom'} maxLength={200} placeholder="e.g. VP Engineering Interview" className="bg-slate-900 border-slate-700" /></div><Button disabled={busy === 'add' || (preset === 'custom' && !customName.trim())} onClick={() => void addStage()} className="bg-blue-600"><Plus className="h-4 w-4 mr-1" />Add</Button></div></div>
-          </section>
-
-          <section className="space-y-3">
-            <div className="flex items-start justify-between gap-3"><h3 className="font-semibold">Lifecycle history</h3><Button size="sm" variant="outline" onClick={() => { setAddingEvent(true); setAddEventForm(newEventForm()); cancelEventEdit() }} className="border-slate-700"><Plus className="h-3.5 w-3.5 mr-1" />Add entry</Button></div>
-
-            {addingEvent && <div className="rounded-xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-4">
-              <div className="flex items-center justify-between gap-3"><div className="font-semibold">Add history entry</div><Button size="icon" variant="ghost" onClick={() => setAddingEvent(false)} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>
-              {renderEventForm(addEventForm, setAddEventForm)}
-              <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => setAddingEvent(false)} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === 'event-add'} onClick={() => void addHistoryEvent()} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Add history</Button></div>
-            </div>}
-
-            {events.length === 0 ? <div className="text-sm text-slate-500">No lifecycle events yet.</div> : <div className="space-y-2">{events.map((event) => <div key={event.id} className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2.5">
-              <div className="flex gap-3"><Clock3 className="h-4 w-4 mt-0.5 text-slate-500" /><div className="min-w-0 flex-1"><div className="text-sm">{EVENT_LABEL[event.event_type] ?? event.event_type.replaceAll('_', ' ')}{event.stage_name_snapshot && <b> · {event.stage_name_snapshot}</b>}</div>{event.from_status && event.to_status && <div className="text-xs text-slate-500">{event.from_status} → {event.to_status}</div>}{event.notes && <div className="text-xs text-slate-500 whitespace-pre-wrap">{event.notes}</div>}<div className="text-[11px] text-slate-600">{fmt(event.occurred_at)}</div></div><div className="flex gap-1"><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => beginEventEdit(event)} className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => void removeEvent(event)} className="h-7 w-7 text-red-300"><Trash2 className="h-3.5 w-3.5" /></Button></div></div>
-
-              {eventEditingId === event.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-900/80 p-4 space-y-4"><div className="flex items-center justify-between gap-3"><div className="font-semibold">Edit history entry</div><Button size="icon" variant="ghost" onClick={cancelEventEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>{renderEventForm(eventEditForm, setEventEditForm)}<div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={cancelEventEdit} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === `event-${event.id}`} onClick={() => void saveEventEdit(event)} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Save history</Button></div></div>}
-            </div>)}</div>}
           </section>
         </div>}
       </DialogContent>
