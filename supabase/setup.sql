@@ -523,6 +523,32 @@ set name = excluded.name,
 
 alter table storage.objects enable row level security;
 
+-- Public buckets do not need a client SELECT policy to serve known object URLs.
+-- Remove legacy resume-related SELECT policies so anon/authenticated clients cannot
+-- enumerate the bucket. Server-side admin listing uses the service-role client.
+do $$
+declare
+  resume_select_policy record;
+begin
+  for resume_select_policy in
+    select policyname
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and cmd = 'SELECT'
+      and (
+        policyname ilike '%resume%'
+        or coalesce(qual, '') ilike '%resumes%'
+      )
+  loop
+    execute format(
+      'drop policy if exists %I on storage.objects',
+      resume_select_policy.policyname
+    );
+  end loop;
+end;
+$$;
+
 drop policy if exists "Users can upload their resumes" on storage.objects;
 drop policy if exists "Users can update their resumes" on storage.objects;
 drop policy if exists "Users can delete their resumes" on storage.objects;
