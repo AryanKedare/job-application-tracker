@@ -83,7 +83,7 @@ const EMPTY_EVENT_FORM: EventForm = { event_type: 'manual_note', stage_id: '', s
 
 function fmt(value?: string | null) {
   if (!value) return ''
-  return new Date(value).toLocaleString('en-IE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return new Date(value).toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function toLocalDateTime(value?: string | null) {
@@ -112,7 +112,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
   const [eventEditForm, setEventEditForm] = useState<EventForm>(EMPTY_EVENT_FORM)
   const [eventDeleteConfirmId, setEventDeleteConfirmId] = useState<string | null>(null)
   const [addingEvent, setAddingEvent] = useState(false)
-  const [addEventForm, setAddEventForm] = useState<EventForm>(newEventForm())
+  const [addEventForm, setAddEventForm] = useState<EventForm>(EMPTY_EVENT_FORM)
 
   const load = useCallback(async () => {
     if (!open) return
@@ -322,7 +322,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     setBusy(null)
     if (error) return onError('Failed to add lifecycle history.')
     setAddingEvent(false)
-    setAddEventForm(newEventForm())
+    setAddEventForm(EMPTY_EVENT_FORM)
     await load()
   }
 
@@ -364,7 +364,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
           </div>
 
           <section className="space-y-3">
-            <div><h3 className="font-semibold">Interview & assessment stages</h3><p className="text-xs text-slate-500">Every stage can be renamed, retyped, reordered, corrected, or deleted.</p></div>
+            <h3 className="font-semibold">Interview & assessment stages</h3>
             {orderedStages.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">No stages yet.</div> : <div className="space-y-2">{orderedStages.map((stage, index) => <div key={stage.id} className={`rounded-xl border p-4 ${stateTone[stage.state]}`}>
               <div className="flex gap-3"><Circle className="h-5 w-5 flex-shrink-0 mt-0.5" /><div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap"><span className="font-semibold text-slate-100">{stage.name}</span><span className="text-[10px] uppercase rounded-full border px-2 py-0.5">{stage.state}</span><span className="text-xs text-slate-600">#{index + 1}</span><span className="text-[10px] text-slate-600">{stage.stage_type}</span></div>
@@ -380,7 +380,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
                 </div>
 
                 {editingId === stage.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-4 text-slate-100">
-                  <div className="flex items-center justify-between gap-3"><div><div className="font-semibold">Edit stage</div><div className="text-xs text-slate-500">Correct the name, type, state, or timestamps.</div></div><Button size="icon" variant="ghost" onClick={cancelEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>
+                  <div className="flex items-center justify-between gap-3"><div className="font-semibold">Edit stage</div><Button size="icon" variant="ghost" onClick={cancelEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5"><Label>Stage name</Label><Input value={editForm.name} maxLength={200} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} className="bg-slate-900 border-slate-700" /></div>
                     <div className="space-y-1.5"><Label>Stage type</Label><Input value={editForm.stage_type} maxLength={80} onChange={(e) => setEditForm((f) => ({ ...f, stage_type: e.target.value }))} placeholder="interview, coding, assessment…" className="bg-slate-900 border-slate-700" /></div>
@@ -399,10 +399,10 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
           </section>
 
           <section className="space-y-3">
-            <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">Lifecycle history</h3><p className="text-xs text-slate-500">History is fully editable. Changes here alter the recorded timeline only; they do not change the live application status or stage state.</p></div><Button size="sm" variant="outline" onClick={() => { setAddingEvent(true); setAddEventForm(newEventForm()); cancelEventEdit() }} className="border-slate-700"><Plus className="h-3.5 w-3.5 mr-1" />Add entry</Button></div>
+            <div className="flex items-start justify-between gap-3"><h3 className="font-semibold">Lifecycle history</h3><Button size="sm" variant="outline" onClick={() => { setAddingEvent(true); setAddEventForm(newEventForm()); cancelEventEdit() }} className="border-slate-700"><Plus className="h-3.5 w-3.5 mr-1" />Add entry</Button></div>
 
             {addingEvent && <div className="rounded-xl border border-blue-500/20 bg-slate-950/60 p-4 space-y-4">
-              <div className="flex items-center justify-between gap-3"><div><div className="font-semibold">Add history entry</div><div className="text-xs text-slate-500">Use this for manual corrections or events that were not captured automatically.</div></div><Button size="icon" variant="ghost" onClick={() => setAddingEvent(false)} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>
+              <div className="flex items-center justify-between gap-3"><div className="font-semibold">Add history entry</div><Button size="icon" variant="ghost" onClick={() => setAddingEvent(false)} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>
               {renderEventForm(addEventForm, setAddEventForm)}
               <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => setAddingEvent(false)} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === 'event-add'} onClick={() => void addHistoryEvent()} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Add history</Button></div>
             </div>}
@@ -410,7 +410,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
             {events.length === 0 ? <div className="text-sm text-slate-500">No lifecycle events yet.</div> : <div className="space-y-2">{events.map((event) => <div key={event.id} className="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2.5">
               <div className="flex gap-3"><Clock3 className="h-4 w-4 mt-0.5 text-slate-500" /><div className="min-w-0 flex-1"><div className="text-sm">{EVENT_LABEL[event.event_type] ?? event.event_type.replaceAll('_', ' ')}{event.stage_name_snapshot && <b> · {event.stage_name_snapshot}</b>}</div>{event.from_status && event.to_status && <div className="text-xs text-slate-500">{event.from_status} → {event.to_status}</div>}{event.notes && <div className="text-xs text-slate-500 whitespace-pre-wrap">{event.notes}</div>}<div className="text-[11px] text-slate-600">{fmt(event.occurred_at)}</div></div><div className="flex gap-1"><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => beginEventEdit(event)} className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button><Button size="icon" variant="ghost" disabled={busy === `event-${event.id}`} onClick={() => { setEventDeleteConfirmId(event.id); if (eventEditingId === event.id) cancelEventEdit() }} className="h-7 w-7 text-red-300"><Trash2 className="h-3.5 w-3.5" /></Button></div></div>
 
-              {eventEditingId === event.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-900/80 p-4 space-y-4"><div className="flex items-center justify-between gap-3"><div><div className="font-semibold">Edit history entry</div><div className="text-xs text-slate-500">This does not change the current application/stage state.</div></div><Button size="icon" variant="ghost" onClick={cancelEventEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>{renderEventForm(eventEditForm, setEventEditForm)}<div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={cancelEventEdit} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === `event-${event.id}`} onClick={() => void saveEventEdit(event)} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Save history</Button></div></div>}
+              {eventEditingId === event.id && <div className="mt-4 rounded-xl border border-blue-500/20 bg-slate-900/80 p-4 space-y-4"><div className="flex items-center justify-between gap-3"><div className="font-semibold">Edit history entry</div><Button size="icon" variant="ghost" onClick={cancelEventEdit} className="h-8 w-8"><X className="h-4 w-4" /></Button></div>{renderEventForm(eventEditForm, setEventEditForm)}<div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={cancelEventEdit} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === `event-${event.id}`} onClick={() => void saveEventEdit(event)} className="bg-blue-600"><Save className="h-3.5 w-3.5 mr-1" />Save history</Button></div></div>}
 
               {eventDeleteConfirmId === event.id && <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4"><div className="font-semibold text-red-200">Delete this history entry?</div><p className="text-xs text-slate-400 mt-1">This removes the event from the timeline. It does not undo or change the current application/stage state.</p><div className="flex justify-end gap-2 mt-3"><Button size="sm" variant="outline" onClick={() => setEventDeleteConfirmId(null)} className="border-slate-700">Cancel</Button><Button size="sm" disabled={busy === `event-${event.id}`} onClick={() => void removeEvent(event)} className="bg-red-600 hover:bg-red-700 text-white"><Trash2 className="h-3.5 w-3.5 mr-1" />Delete history</Button></div></div>}
             </div>)}</div>}
