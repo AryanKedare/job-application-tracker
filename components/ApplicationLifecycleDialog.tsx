@@ -162,7 +162,7 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-slate-900 border-slate-700 text-slate-100">
         <DialogHeader><DialogTitle className="flex items-center gap-2"><ListTree className="h-5 w-5 text-blue-400" />{job.job_title} lifecycle</DialogTitle><p className="text-sm text-slate-400">{job.company || 'Unknown company'} · {job.status}</p></DialogHeader>
 
-        {schemaMissing ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">Apply <span className="font-mono">20260816143000_application_lifecycle.sql</span> in Supabase before using stage tracking.</div>
+        {schemaMissing ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">Run <span className="font-mono">supabase/setup.sql</span> in the Supabase SQL Editor before using stage tracking.</div>
         : loading ? <div className="py-16 flex justify-center"><div className="h-7 w-7 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" /></div>
         : <div className="space-y-6">
           <div className="grid sm:grid-cols-3 gap-3">
