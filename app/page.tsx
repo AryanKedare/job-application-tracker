@@ -16,12 +16,12 @@ const STATUS_CONFIG: {
   color: string
   bg: string
 }[] = [
-  { key: 'Applied',      label: 'Applied',      icon: <Briefcase className="w-4 h-4" />,   color: 'text-blue-300',    bg: 'bg-blue-500/15 border-blue-500/30' },
-  { key: 'Interviewing', label: 'Interviewing', icon: <TrendingUp className="w-4 h-4" />,  color: 'text-yellow-300',  bg: 'bg-yellow-500/15 border-yellow-500/30' },
-  { key: 'Offer',        label: 'Offer',        icon: <Trophy className="w-4 h-4" />,      color: 'text-emerald-300', bg: 'bg-emerald-500/15 border-emerald-500/30' },
-  { key: 'Rejected',     label: 'Rejected',     icon: <XCircle className="w-4 h-4" />,    color: 'text-red-300',     bg: 'bg-red-500/15 border-red-500/30' },
-  { key: 'Ghosted',      label: 'Ghosted',      icon: <Ghost className="w-4 h-4" />,      color: 'text-slate-400',   bg: 'bg-slate-700/40 border-slate-600/30' },
-  { key: 'Bookmarked',   label: 'Saved',        icon: <Bookmark className="w-4 h-4" />,   color: 'text-slate-300',   bg: 'bg-slate-800/60 border-slate-700/40' },
+  { key: 'Applied',      label: 'Applied',      icon: <Briefcase className="w-4 h-4" />,   color: 'text-blue-300',    bg: 'bg-blue-500/10 border-blue-500/20' },
+  { key: 'Interviewing', label: 'Interviewing', icon: <TrendingUp className="w-4 h-4" />,  color: 'text-yellow-300',  bg: 'bg-yellow-500/10 border-yellow-500/20' },
+  { key: 'Offer',        label: 'Offer',        icon: <Trophy className="w-4 h-4" />,      color: 'text-emerald-300', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+  { key: 'Rejected',     label: 'Rejected',     icon: <XCircle className="w-4 h-4" />,    color: 'text-red-300',     bg: 'bg-red-500/10 border-red-500/20' },
+  { key: 'Ghosted',      label: 'Ghosted',      icon: <Ghost className="w-4 h-4" />,      color: 'text-slate-400',   bg: 'bg-slate-800/70 border-slate-700/60' },
+  { key: 'Bookmarked',   label: 'Saved',        icon: <Bookmark className="w-4 h-4" />,   color: 'text-slate-300',   bg: 'bg-slate-800/70 border-slate-700/60' },
 ]
 
 export default function Home() {
@@ -87,11 +87,11 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex flex-col py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto flex-1 w-full">
 
         {/* Top bar */}
-        <div className="flex justify-end mb-6 min-h-[36px]">
+        <div className="flex justify-end mb-8 min-h-[36px]">
           {loggedIn ? (
             <div className="flex items-center gap-3">
               {editingName ? (
@@ -102,7 +102,7 @@ export default function Home() {
                     onChange={(e) => setNameInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false) }}
                     placeholder="Your name"
-                    className="h-7 w-36 text-sm bg-slate-800 border-slate-600 px-2 py-1"
+                    className="h-8 w-36 text-sm bg-slate-900 border-slate-700 px-2 py-1"
                   />
                   <button
                     onClick={handleSaveName}
@@ -148,7 +148,7 @@ export default function Home() {
 
         {/* Name prompt banner */}
         {loggedIn && !hasRealName && !editingName && (
-          <div className="mb-6 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+          <div className="mb-8 flex items-center justify-between bg-amber-500/[0.07] border border-amber-500/20 rounded-lg px-4 py-3">
             <p className="text-sm text-amber-300">
               👋 Looks like you don&apos;t have a name set yet. Add one so we can greet you properly!
             </p>
@@ -168,40 +168,40 @@ export default function Home() {
               Welcome back, <span className="text-slate-200 font-semibold">{userName}</span>!
             </p>
           )}
-          <h1 className="text-5xl md:text-7xl font-black bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-400 bg-clip-text text-transparent mb-6">
+          <h1 className="text-5xl md:text-6xl font-bold tracking-tight text-slate-50 mb-5">
             Job Tracker
           </h1>
-          <p className="text-xl md:text-2xl text-slate-300 max-w-2xl mx-auto leading-relaxed">
+          <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed">
             Track job applications, resumes, and notes in one clean place.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-16">
 
           {/* View applications card */}
           <Link href="/jobs" className="group">
-            <div className="group-hover:bg-gradient-to-r group-hover:from-blue-600 group-hover:to-purple-600 bg-slate-900/70 rounded-3xl p-10 shadow-2xl border border-slate-800 hover:shadow-3xl transition-all duration-500 hover:-translate-y-2 h-full flex flex-col">
-              <FileText className="w-16 h-16 mx-auto mb-6 text-blue-400 group-hover:text-white transition-colors" />
-              <h3 className="text-2xl font-bold mb-4 group-hover:text-white text-center">View applications</h3>
-              <p className="text-lg text-slate-300 group-hover:text-slate-100 mb-8 flex-1 text-center">
+            <div className="bg-slate-900/75 rounded-xl p-8 border border-slate-800 hover:border-slate-700 hover:bg-slate-900 transition-[background-color,border-color] duration-150 h-full flex flex-col">
+              <FileText className="w-11 h-11 mx-auto mb-6 text-blue-400" />
+              <h3 className="text-xl font-semibold mb-3 text-slate-100 text-center">View applications</h3>
+              <p className="text-base text-slate-400 mb-7 flex-1 text-center">
                 See every application, status, and resume in one table.
               </p>
               <Button
                 size="lg"
-                className="w-full h-14 bg-blue-600 hover:bg-blue-700 group-hover:bg-white/20 border border-blue-300/40"
+                className="w-full h-12 bg-blue-600 hover:bg-blue-500"
               >
                 Open dashboard
-                <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </div>
           </Link>
 
           {/* Stats card */}
-          <div className="bg-slate-900/70 rounded-3xl p-8 shadow-2xl border border-slate-800 h-full flex flex-col text-left">
+          <div className="bg-slate-900/75 rounded-xl p-8 border border-slate-800 h-full flex flex-col text-left">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-bold text-slate-100">Your Progress</h3>
+              <h3 className="text-xl font-semibold text-slate-100">Your Progress</h3>
               {total !== null && (
-                <span className="text-sm font-semibold text-slate-400 bg-slate-800 px-3 py-1 rounded-full">
+                <span className="text-xs font-medium text-slate-400 bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-full">
                   {total} total
                 </span>
               )}
@@ -226,11 +226,11 @@ export default function Home() {
                 {STATUS_CONFIG.map(({ key, label, icon, color, bg }) => {
                   const count = stats[key] ?? 0
                   return (
-                    <div key={key} className={`flex items-center gap-3 rounded-xl px-4 py-3 border ${bg}`}>
+                    <div key={key} className={`flex items-center gap-3 rounded-lg px-4 py-3 border ${bg}`}>
                       <span className={color}>{icon}</span>
                       <div>
-                        <div className={`text-xl font-bold leading-none ${color}`}>{count}</div>
-                        <div className="text-xs text-slate-400 mt-0.5">{label}</div>
+                        <div className={`text-lg font-semibold leading-none ${color}`}>{count}</div>
+                        <div className="text-xs text-slate-400 mt-1">{label}</div>
                       </div>
                     </div>
                   )
@@ -243,7 +243,7 @@ export default function Home() {
       </div>
 
       {/* Footer */}
-      <footer className="max-w-4xl mx-auto w-full border-t border-slate-800/60 pt-6 pb-2 px-4">
+      <footer className="max-w-4xl mx-auto w-full border-t border-slate-800 pt-6 pb-2 px-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-slate-600">
             Built with Next.js, Supabase &amp; Tailwind CSS
@@ -252,9 +252,9 @@ export default function Home() {
             href="https://github.com/AryanKedare/job-application-tracker"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-xs text-slate-500 hover:text-slate-200 transition-colors group"
+            className="inline-flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors"
           >
-            <Github className="w-4 h-4 group-hover:scale-110 transition-transform" />
+            <Github className="w-4 h-4" />
             <span>View source on GitHub</span>
           </a>
         </div>
