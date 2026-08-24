@@ -1,12 +1,16 @@
 // app/layout.tsx
 import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
 import './globals.css'
+import { cn } from '@/lib/utils'
 import { SupabaseProvider } from '@/lib/supabaseProvider'
 import AuthRecoveryRedirect from '@/components/AuthRecoveryRedirect'
 
+const inter = Inter({ subsets: ['latin'] })
+
 export const metadata: Metadata = {
   title: 'Job Tracker',
-  description: 'Track your applications, interviews, resumes and outcomes in one place.',
+  description: 'Track your job applications beautifully',
 }
 
 export default function RootLayout({
@@ -16,7 +20,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="app-shell antialiased">
+      <body
+        className={cn(
+          'min-h-screen bg-slate-950 antialiased',
+          inter.className
+        )}
+      >
         <SupabaseProvider>
           <AuthRecoveryRedirect />
           {children}
