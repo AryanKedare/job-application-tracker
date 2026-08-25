@@ -1,6 +1,16 @@
 export type DateValue = string | number | Date | null | undefined
 
-const pad = (value: number) => String(value).padStart(2, '0')
+const DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+})
+
+const TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true,
+})
 
 function normalizePostgresTimestamp(value: string) {
   return value.replace(/(\.\d{3})\d+(?=(?:Z|[+-]\d{2}:?\d{2})$)/, '$1')
@@ -22,8 +32,7 @@ export function formatLocalDate(value: DateValue): string {
   }
 
   const date = parseDate(value)
-  if (!date) return ''
-  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
+  return date ? DATE_FORMATTER.format(date) : ''
 }
 
 export function formatLocalDateTime(value: DateValue): string {
@@ -33,10 +42,5 @@ export function formatLocalDateTime(value: DateValue): string {
   }
 
   const date = parseDate(value)
-  if (!date) return ''
-
-  const hours24 = date.getHours()
-  const hours12 = hours24 % 12 || 12
-  const period = hours24 >= 12 ? 'PM' : 'AM'
-  return `${pad(hours12)}:${pad(date.getMinutes())} ${period} ${formatLocalDate(date)}`
+  return date ? `${TIME_FORMATTER.format(date)} ${DATE_FORMATTER.format(date)}` : ''
 }

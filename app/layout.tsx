@@ -2,8 +2,6 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { cn } from '@/lib/utils'
-import { SupabaseProvider } from '@/lib/supabaseProvider'
 import AuthRecoveryRedirect from '@/components/AuthRecoveryRedirect'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -20,16 +18,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body
-        className={cn(
-          'min-h-screen bg-slate-950 antialiased',
-          inter.className
-        )}
-      >
-        <SupabaseProvider>
-          <AuthRecoveryRedirect />
-          {children}
-        </SupabaseProvider>
+      <body className={`min-h-screen bg-slate-950 antialiased ${inter.className}`}>
+        <AuthRecoveryRedirect />
+        {children}
       </body>
     </html>
   )
