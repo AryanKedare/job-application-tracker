@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
+import { resumeStoragePath } from '@/lib/resume-storage'
 import { ApplicationStage, JobApplication } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,21 +45,8 @@ function InitialsAvatar({ name }: { name: string }) {
   return <AvatarShell colorClass={color}><span className="text-xs font-bold tracking-wide text-white">{initials}</span></AvatarShell>
 }
 
-function CompanyAvatar({ name }: { name: string }) {
-  const [failed, setFailed] = useState(false)
-  const company = name.trim()
-  useEffect(() => setFailed(false), [company])
-  if (!company || failed) return <InitialsAvatar name={company || '?'} />
-  return <AvatarShell>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={`/api/company-logo?company=${encodeURIComponent(company)}`} alt={`${company} logo`} width={32} height={32} className="w-8 h-8 object-contain p-0.5" loading="lazy" onError={() => setFailed(true)} /></AvatarShell>
-}
-
 interface ToastState { message: string; type: 'success' | 'error' }
 type StageMap = Record<string, ApplicationStage[]>
-
-function extractStoragePath(resumeUrl: string): string | null {
-  const match = resumeUrl.match(/\/object\/public\/resumes\/(.+)$/)
-  return match ? match[1] : null
-}
 
 function stageSummary(stages: ApplicationStage[], status: JobApplication['status']) {
   const rejected = stages.filter((stage) => stage.state === 'rejected').sort((a, b) => new Date(b.completed_at ?? 0).getTime() - new Date(a.completed_at ?? 0).getTime())[0]
@@ -154,6 +142,24 @@ export default function JobsTablePage() {
     else await fetchData(false)
   }
 
+  const handleOpenResume = async (resumeValue: string) => {
+    const path = resumeStoragePath(resumeValue)
+    if (!path) { showToast('Resume file reference is invalid.', 'error'); return }
+
+    const popup = window.open('about:blank', '_blank')
+    if (popup) popup.opener = null
+
+    const { data, error } = await supabase.storage.from('resumes').createSignedUrl(path, 60)
+    if (error || !data?.signedUrl) {
+      popup?.close()
+      showToast('Failed to open resume.', 'error')
+      return
+    }
+
+    if (popup) popup.location.href = data.signedUrl
+    else showToast('Your browser blocked the resume window. Allow pop-ups and try again.', 'error')
+  }
+
   const handleDeleteConfirm = async () => {
     const job = deleteDialog.job
     if (!job) return
@@ -162,7 +168,16 @@ export default function JobsTablePage() {
     setStagesByApplication((current) => { const next = { ...current }; delete next[job.id]; return next })
     const { error: dbError } = await supabase.from('job_applications').delete().eq('id', job.id).eq('user_id', userId)
     if (dbError) { showToast('Failed to delete application.', 'error'); void fetchData(false); return }
-    if (job.resume_url) { const path = extractStoragePath(job.resume_url); if (path) await supabase.storage.from('resumes').remove([path]) }
+    if (job.resume_url) {
+      const path = resumeStoragePath(job.resume_url)
+      if (path) {
+        const { error: storageError } = await supabase.storage.from('resumes').remove([path])
+        if (storageError) {
+          showToast('Application deleted, but its resume file could not be removed.', 'error')
+          return
+        }
+      }
+    }
     showToast(`Deleted "${job.job_title}".`, 'success')
   }
 
@@ -188,7 +203,7 @@ export default function JobsTablePage() {
 
       <div className="flex flex-col sm:flex-row gap-3"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by role, company, location, or interview stage…" className="pl-9 bg-slate-900 border-slate-700" /></div><div className="flex items-center gap-2"><Filter className="w-4 h-4 text-slate-500" /><div className="flex gap-1.5 flex-wrap">{(['All', ...STATUS_OPTIONS] as const).map((status) => <button key={status} onClick={() => setStatusFilter(status)} className={`text-xs px-3 py-1.5 rounded-full border ${statusFilter === status ? 'bg-slate-100 text-slate-900 border-slate-100' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>{status}</button>)}</div></div></div>
 
-      {filteredJobs.length === 0 ? <div className="text-center py-20 rounded-2xl border border-dashed border-slate-700 text-slate-400">{jobs.length ? 'No results found.' : 'No applications yet.'}</div> : <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1280px] table-fixed text-sm"><colgroup><col className="w-[15%]" /><col className="w-[20%]" /><col className="w-[9%]" /><col className="w-[10%]" /><col className="w-[16%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[5%]" /></colgroup><thead><tr className="border-b border-slate-800 text-left text-xs text-slate-500 uppercase"><th className="px-4 py-3.5">Company</th><th className="px-4 py-3.5">Role</th><th className="px-4 py-3.5">Location</th><th className="px-4 py-3.5">Status</th><th className="px-4 py-3.5">Stage</th><th className="px-4 py-3.5">Apply</th><th className="px-4 py-3.5">Resume</th><th className="px-4 py-3.5">Notes</th><th className="px-4 py-3.5">Date</th><th /></tr></thead><tbody className="divide-y divide-slate-800/70">{filteredJobs.map((job) => { const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status); return <tr key={job.id} className="group hover:bg-slate-800/40"><td className="px-4 py-3.5"><div className="flex min-w-0 items-center gap-3"><CompanyAvatar name={job.company || job.job_title} /><span className="min-w-0 truncate font-medium">{job.company || '—'}</span></div></td><td className="px-4 py-3.5"><div className="truncate font-semibold">{job.job_title}</div></td><td className="px-4 py-3.5"><div className="truncate text-slate-400">{job.location || '—'}</div></td><td className="px-4 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} className={`appearance-none text-xs font-semibold rounded-full pl-5 pr-3 py-1 ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td><td className="px-4 py-3.5"><button onClick={() => setLifecycleDialog({ open: true, job })} className="flex min-w-0 max-w-full items-center gap-2 text-left"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="text-xs text-blue-400">Add stages</span>}</button></td><td className="px-4 py-3.5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400">Link<ExternalLink className="w-3 h-3" /></a> : '—'}</td><td className="px-4 py-3.5">{job.resume_url ? <a href={job.resume_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1"><Download className="w-3 h-3" />CV</a> : '—'}</td><td className="px-4 py-3.5">{job.notes?.trim() ? <button onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 text-amber-400"><StickyNote className="w-3 h-3" />View</button> : '—'}</td><td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td><td className="px-2 py-3.5"><div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100"><button onClick={() => setEditDialog({ open: true, job })} className="p-1.5"><Pencil className="w-3.5 h-3.5" /></button><button onClick={() => setDeleteDialog({ open: true, job })} className="p-1.5 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button></div></td></tr> })}</tbody></table></div></div>}
+      {filteredJobs.length === 0 ? <div className="text-center py-20 rounded-2xl border border-dashed border-slate-700 text-slate-400">{jobs.length ? 'No results found.' : 'No applications yet.'}</div> : <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1280px] table-fixed text-sm"><colgroup><col className="w-[15%]" /><col className="w-[20%]" /><col className="w-[9%]" /><col className="w-[10%]" /><col className="w-[16%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[5%]" /></colgroup><thead><tr className="border-b border-slate-800 text-left text-xs text-slate-500 uppercase"><th className="px-4 py-3.5">Company</th><th className="px-4 py-3.5">Role</th><th className="px-4 py-3.5">Location</th><th className="px-4 py-3.5">Status</th><th className="px-4 py-3.5">Stage</th><th className="px-4 py-3.5">Apply</th><th className="px-4 py-3.5">Resume</th><th className="px-4 py-3.5">Notes</th><th className="px-4 py-3.5">Date</th><th /></tr></thead><tbody className="divide-y divide-slate-800/70">{filteredJobs.map((job) => { const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status); return <tr key={job.id} className="group hover:bg-slate-800/40"><td className="px-4 py-3.5"><div className="flex min-w-0 items-center gap-3"><InitialsAvatar name={job.company || job.job_title} /><span className="min-w-0 truncate font-medium">{job.company || '—'}</span></div></td><td className="px-4 py-3.5"><div className="truncate font-semibold">{job.job_title}</div></td><td className="px-4 py-3.5"><div className="truncate text-slate-400">{job.location || '—'}</div></td><td className="px-4 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} className={`appearance-none text-xs font-semibold rounded-full pl-5 pr-3 py-1 ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td><td className="px-4 py-3.5"><button onClick={() => setLifecycleDialog({ open: true, job })} className="flex min-w-0 max-w-full items-center gap-2 text-left"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="text-xs text-blue-400">Add stages</span>}</button></td><td className="px-4 py-3.5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400">Link<ExternalLink className="w-3 h-3" /></a> : '—'}</td><td className="px-4 py-3.5">{job.resume_url ? <button type="button" onClick={() => void handleOpenResume(job.resume_url!)} className="inline-flex items-center gap-1"><Download className="w-3 h-3" />CV</button> : '—'}</td><td className="px-4 py-3.5">{job.notes?.trim() ? <button onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 text-amber-400"><StickyNote className="w-3 h-3" />View</button> : '—'}</td><td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td><td className="px-2 py-3.5"><div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100"><button onClick={() => setEditDialog({ open: true, job })} className="p-1.5"><Pencil className="w-3.5 h-3.5" /></button><button onClick={() => setDeleteDialog({ open: true, job })} className="p-1.5 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button></div></td></tr> })}</tbody></table></div></div>}
     </div></div>
 
     <AddJobDialog open={addOpen} setOpen={setAddOpen} userId={userId} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => [job, ...current]); showToast('Application added!', 'success') }} />

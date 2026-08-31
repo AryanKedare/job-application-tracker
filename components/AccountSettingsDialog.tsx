@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ApplicationStage, JobApplication } from '@/lib/types'
 import { formatLocalDate, formatLocalDateTime } from '@/lib/date'
+import { resumeStoragePath, spreadsheetSafe } from '@/lib/resume-storage'
 import {
   Dialog,
   DialogContent,
@@ -65,7 +66,7 @@ async function exportToCSV(jobs: JobApplication[], userId: string) {
   const headers = [
     'Company', 'Role', 'Location', 'Status',
     'Current / Last Stage', 'Application Lifecycle',
-    'Date Applied', 'Job Link', 'Resume URL', 'Source', 'Notes',
+    'Date Applied', 'Job Link', 'Resume Storage Path', 'Source', 'Notes',
   ]
   const rows = jobs.map((j) => {
     const stages = (stagesByApplication.get(j.id) ?? [])
@@ -80,13 +81,16 @@ async function exportToCSV(jobs: JobApplication[], userId: string) {
       stages.map(formatLifecycleStage).join(' → '),
       formatLocalDateTime(j.date_applied),
       j.job_link ?? '',
-      j.resume_url ?? '',
+      resumeStoragePath(j.resume_url) ?? '',
       j.source ?? '',
       (j.notes ?? '').replace(/\n/g, ' | '),
     ]
   })
 
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
+  const escape = (value: string) => {
+    const safe = spreadsheetSafe(value)
+    return `"${safe.replace(/"/g, '""')}"`
+  }
   const csvContent = [
     headers.map(escape).join(','),
     ...rows.map((r) => r.map(escape).join(',')),
@@ -133,18 +137,14 @@ export default function AccountSettingsDialog({
 
     try {
       const resumePaths = jobs
-        .map((j) => {
-          if (!j.resume_url) return null
-          const match = j.resume_url.match(/\/object\/public\/resumes\/(.+)$/)
-          return match ? match[1] : null
-        })
-        .filter(Boolean) as string[]
+        .map((job) => resumeStoragePath(job.resume_url))
+        .filter((path): path is string => Boolean(path))
 
       if (resumePaths.length > 0) {
         const { error: storageError } = await supabase.storage
           .from('resumes')
           .remove(resumePaths)
-        if (storageError) console.error('Storage deletion error:', storageError)
+        if (storageError) throw new Error(`Resume deletion failed: ${storageError.message}`)
       }
 
       const { error: dbError } = await supabase
@@ -159,7 +159,7 @@ export default function AccountSettingsDialog({
       onDataDeleted()
     } catch (err) {
       console.error(err)
-      setDeleteError('Something went wrong. Please try again.')
+      setDeleteError('Could not delete all data. No success message will be shown until both resume files and applications are removed.')
       setDeletePhase('confirm')
     }
   }
@@ -221,7 +221,7 @@ export default function AccountSettingsDialog({
                 <p className="text-sm font-medium text-slate-200">Export to CSV</p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Downloads all {jobs.length} application{jobs.length !== 1 ? 's' : ''} as a spreadsheet.
-                  Includes company, role, status, lifecycle stages, dates, job links, and resume URLs.
+                  Includes company, role, status, lifecycle stages, dates, job links, and private resume storage paths.
                 </p>
               </div>
               {exportError && <p className="text-xs text-red-400">{exportError}</p>}
