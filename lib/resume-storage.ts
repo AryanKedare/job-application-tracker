@@ -24,5 +24,5 @@ export function resumeStoragePath(value: string | null | undefined): string | nu
 }
 
 export function spreadsheetSafe(value: string): string {
-  return /^[=+\-@]/.test(value) ? `'${value}` : value
+  return /^[\t\r\n ]*[=+\-@]/.test(value) ? `'${value}` : value
 }
