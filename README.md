@@ -4,7 +4,7 @@ A self-hosted job application tracker built with **Next.js**, **Supabase**, **Ta
 
 Track applications, interview rounds, assessments, resumes, notes, lifecycle history, and outcomes in one place.
 
-> Registration is invitation-only. The login page can optionally open a pre-filled access-request email for users who do not yet have an invite.
+> Registration is invitation-only. When access requests are enabled, the login page checks whether the entered email already belongs to an account before preparing an access-request email.
 
 ## Features
 
@@ -34,7 +34,7 @@ The importer resolves and validates public addresses before connecting, pins out
 - Password recovery
 - Invitation-only onboarding
 - Single-use invite codes
-- Optional one-click access-request email from the login page
+- Optional access-request flow with an existing-account check
 - Server-side admin portal at `/admin`
 - User invitations, recovery links, magic links, profile updates, and deletion
 - Supabase Row-Level Security for user data isolation
@@ -152,7 +152,7 @@ Optional access-request contact:
 NEXT_PUBLIC_ACCESS_REQUEST_EMAIL=
 ```
 
-Set `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` only in your deployment environment if you want the login page to show **Request access by email**. If it is blank or unset, that link is hidden.
+Set `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` only in your deployment environment if you want the login page to show **Request access**. If it is blank or unset, the button and the account-check endpoint are disabled.
 
 Optional values:
 
@@ -187,9 +187,13 @@ Use the admin portal to invite the first user.
 
 Existing users can sign in by password or magic link. A person with a valid single-use invite code can create an account from the login page.
 
-When `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is configured, someone without an invite can click **Request access by email**. The browser opens their configured email application with a pre-filled message. If they already typed an email address into the login form, that address is included automatically in the draft.
+When `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is configured, someone without an invite can enter their email and select **Request access**. Before a mail draft is opened, `/api/access-request` checks Supabase Auth for an exact email match using the server-side service-role client.
 
-The template is:
+- If the account already exists, the user stays on the login page and is told to sign in with their existing credentials or use password recovery.
+- If the account does not exist, the browser opens the configured email application with a pre-filled access request containing the entered email.
+- The account-check endpoint is same-origin restricted, rate-limited on a best-effort basis, and disabled when access requests are not configured.
+
+The request template is:
 
 ```text
 Subject: Access request - Job Application Tracker
@@ -199,13 +203,15 @@ Hello,
 I'd like to request access to Job Application Tracker.
 
 Name:
-Email: [your email]
+Email: <entered email>
 Reason for access:
 
 Thanks.
 ```
 
 The mail client still requires the requester to press **Send**; the application itself does not send email on their behalf or include mail-provider credentials.
+
+Because the requested UX explicitly distinguishes existing from non-existing accounts, this flow reveals whether a submitted email is registered. Operators who do not want that behavior should leave `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` unset.
 
 ## Application lifecycle
 
