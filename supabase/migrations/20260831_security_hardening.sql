@@ -10,9 +10,9 @@ begin;
 -- These trigger functions must write history even though authenticated users can
 -- no longer insert/update/delete application_stage_events directly.
 alter function public.log_application_stage_event() security definer;
-alter function public.log_application_stage_event() set search_path = public;
+alter function public.log_application_stage_event() set search_path = public, pg_temp;
 alter function public.log_application_status_event() security definer;
-alter function public.log_application_status_event() set search_path = public;
+alter function public.log_application_status_event() set search_path = public, pg_temp;
 
 -- Trigger functions are not application RPC endpoints.
 revoke execute on function public.log_application_stage_event() from public, anon, authenticated;
