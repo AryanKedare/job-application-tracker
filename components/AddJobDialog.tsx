@@ -77,6 +77,7 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
       setUrlError('Enter a valid job link first.')
       return
     }
+
     setImporting(true)
     try {
       const response = await fetch('/api/jobs/import', {
@@ -128,6 +129,10 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
+    if (!formData.job_title.trim()) {
+      onError('Enter a job title.')
+      return
+    }
     if (!isSafeUrl(formData.job_link)) {
       setUrlError('Enter a valid http:// or https:// URL.')
       return
@@ -140,7 +145,7 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
 
     try {
       uploadedResumePath = await uploadResume()
-      const values = { ...formData, ...(uploadedResumePath ? { resume_url: uploadedResumePath } : {}) }
+      const values = { ...formData, job_title: formData.job_title.trim(), ...(uploadedResumePath ? { resume_url: uploadedResumePath } : {}) }
       const query = editJob
         ? supabase.from('job_applications').update(values).eq('id', editJob.id).eq('user_id', userId)
         : supabase.from('job_applications').insert([{ ...values, user_id: userId }])
@@ -164,12 +169,7 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
         })
 
         if (stageError) {
-          const { error: rollbackError } = await supabase
-            .from('job_applications')
-            .delete()
-            .eq('id', savedJob.id)
-            .eq('user_id', userId)
-
+          const { error: rollbackError } = await supabase.from('job_applications').delete().eq('id', savedJob.id).eq('user_id', userId)
           if (!rollbackError) applicationOwnsUpload = false
           throw stageError
         }
@@ -202,46 +202,56 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-2xl flex flex-col max-h-[90vh] p-0 bg-slate-900 border border-slate-700 text-slate-100">
-        <DialogHeader className="p-8 pb-6 border-b border-slate-800">
-          <DialogTitle className="text-2xl font-bold">{editJob ? 'Edit Application' : 'Add New Application'}</DialogTitle>
+      <DialogContent className="flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-2xl flex-col overflow-hidden border border-slate-700 bg-slate-900 p-0 text-slate-100">
+        <DialogHeader className="border-b border-slate-800 p-5 sm:p-7">
+          <DialogTitle className="text-xl font-bold sm:text-2xl">{editJob ? 'Edit application' : 'Add application'}</DialogTitle>
         </DialogHeader>
-        <div className="overflow-y-auto flex-1">
-          <form onSubmit={handleSubmit} className="p-8 space-y-6">
+
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <form onSubmit={handleSubmit} className="space-y-5 p-5 sm:p-7">
             {!editJob && (
-              <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 p-4 space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-blue-200"><Sparkles className="h-4 w-4" /> Fill with Groq AI</div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Input type="url" placeholder="Paste the job posting link" value={formData.job_link}
-                    onChange={(e) => handleLink(e.target.value)} className="bg-slate-950/60 border-slate-700" />
-                  <Button type="button" onClick={importFromLink} disabled={importing || !formData.job_link}
-                    className="bg-blue-600 hover:bg-blue-700 whitespace-nowrap">
-                    {importing ? 'Reading job…' : 'Auto-fill details'}
+              <section className="space-y-3 rounded-xl border border-blue-500/25 bg-blue-500/10 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-blue-200"><Sparkles className="h-4 w-4" />Import job details</div>
+                <Label htmlFor="import-job-link">Job posting URL</Label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input id="import-job-link" type="url" value={formData.job_link} onChange={(event) => handleLink(event.target.value)} className="min-w-0 bg-slate-950/60 border-slate-700" />
+                  <Button type="button" onClick={importFromLink} disabled={importing || !formData.job_link} className="bg-blue-600 hover:bg-blue-700 sm:flex-shrink-0">
+                    {importing ? 'Importing…' : 'Import'}
                   </Button>
                 </div>
-                <p className="text-xs text-slate-400">Review the extracted information before saving.</p>
-              </div>
+              </section>
             )}
 
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="space-y-2"><Label htmlFor="job_title">Job Title *</Label><Input id="job_title" required maxLength={200} value={formData.job_title} onChange={(e) => field('job_title', e.target.value)} className="bg-slate-800 border-slate-700" /></div>
-              <div className="space-y-2"><Label htmlFor="company">Company</Label><Input id="company" maxLength={200} value={formData.company} onChange={(e) => field('company', e.target.value)} className="bg-slate-800 border-slate-700" /></div>
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="job_title">Job title</Label><Input id="job_title" required maxLength={200} value={formData.job_title} onChange={(event) => field('job_title', event.target.value)} className="bg-slate-800 border-slate-700" /></div>
+              <div className="space-y-2"><Label htmlFor="company">Company</Label><Input id="company" maxLength={200} value={formData.company} onChange={(event) => field('company', event.target.value)} className="bg-slate-800 border-slate-700" /></div>
             </div>
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="space-y-2"><Label htmlFor="job_link">Job Link</Label><Input id="job_link" type="url" maxLength={2048} value={formData.job_link} onChange={(e) => handleLink(e.target.value)} className="bg-slate-800 border-slate-700" />{urlError && <p className="text-xs text-red-400">{urlError}</p>}</div>
-              <div className="space-y-2"><Label>Status</Label><Select value={formData.status} onValueChange={(value) => field('status', value as JobApplication['status'])}><SelectTrigger className="bg-slate-800 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700">{(['Bookmarked','Applied','Interviewing','Offer','Rejected','Ghosted'] as const).map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="job_link">Job link</Label><Input id="job_link" type="url" maxLength={2048} value={formData.job_link} onChange={(event) => handleLink(event.target.value)} className="bg-slate-800 border-slate-700" />{urlError && <p role="alert" className="text-xs text-red-400">{urlError}</p>}</div>
+              <div className="space-y-2"><Label>Status</Label><Select value={formData.status} onValueChange={(value) => field('status', value as JobApplication['status'])}><SelectTrigger className="bg-slate-800 border-slate-700"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700">{(['Bookmarked', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Ghosted'] as const).map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>
             </div>
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="space-y-2"><Label htmlFor="location">Location</Label><Input id="location" maxLength={200} value={formData.location} onChange={(e) => field('location', e.target.value)} className="bg-slate-800 border-slate-700" /></div>
-              <div className="space-y-2"><Label htmlFor="source">Source</Label><Input id="source" maxLength={200} value={formData.source} onChange={(e) => field('source', e.target.value)} className="bg-slate-800 border-slate-700" /></div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="location">Location</Label><Input id="location" maxLength={200} value={formData.location} onChange={(event) => field('location', event.target.value)} className="bg-slate-800 border-slate-700" /></div>
+              <div className="space-y-2"><Label htmlFor="source">Source</Label><Input id="source" maxLength={200} value={formData.source} onChange={(event) => field('source', event.target.value)} className="bg-slate-800 border-slate-700" /></div>
             </div>
-            <div className="space-y-2"><Label htmlFor="notes">Notes</Label><Textarea id="notes" rows={5} maxLength={5000} value={formData.notes} onChange={(e) => field('notes', e.target.value)} className="bg-slate-800 border-slate-700 resize-none" /></div>
+
+            <div className="space-y-2"><Label htmlFor="notes">Notes</Label><Textarea id="notes" rows={5} maxLength={5000} value={formData.notes} onChange={(event) => field('notes', event.target.value)} className="resize-none bg-slate-800 border-slate-700" /></div>
+
             <div className="space-y-2">
-              <Label>Resume (PDF, max 5 MB)</Label>
-              {resumeFile ? <div className="flex items-center gap-3 p-3 rounded-md bg-slate-800 border border-slate-700"><Paperclip className="h-4 w-4 text-emerald-400" /><span className="text-sm truncate flex-1">{resumeFile.name}</span><button type="button" onClick={() => setResumeFile(null)} aria-label="Remove resume"><X className="h-4 w-4" /></button></div>
-                : <label className="flex items-center gap-3 p-3 rounded-md bg-slate-800 border border-dashed border-slate-600 cursor-pointer"><Paperclip className="h-4 w-4" /><span className="text-sm text-slate-400">Attach resume PDF</span><input type="file" accept=".pdf,application/pdf" className="sr-only" onChange={handleResume} /></label>}
+              <Label>Resume PDF</Label>
+              {resumeFile ? (
+                <div className="flex min-w-0 items-center gap-3 rounded-md border border-slate-700 bg-slate-800 p-3"><Paperclip className="h-4 w-4 flex-shrink-0 text-emerald-400" /><span className="min-w-0 flex-1 truncate text-sm">{resumeFile.name}</span><button type="button" onClick={() => setResumeFile(null)} aria-label="Remove resume" className="flex-shrink-0"><X className="h-4 w-4" /></button></div>
+              ) : (
+                <label className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-slate-600 bg-slate-800 p-3"><Paperclip className="h-4 w-4" /><span className="text-sm text-slate-300">Choose PDF</span><input type="file" accept=".pdf,application/pdf" className="sr-only" onChange={handleResume} /></label>
+              )}
             </div>
-            <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={() => setOpen(false)} className="border-slate-700">Cancel</Button><Button type="submit" disabled={submitting || importing || !!urlError} className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold">{submitting ? 'Saving…' : editJob ? 'Save changes' : 'Add Application'}</Button></div>
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)} className="border-slate-700">Cancel</Button>
+              <Button type="submit" disabled={submitting || importing || Boolean(urlError)} className="bg-emerald-500 font-semibold text-slate-950 hover:bg-emerald-600">{submitting ? 'Saving…' : editJob ? 'Save changes' : 'Add application'}</Button>
+            </div>
           </form>
         </div>
       </DialogContent>
