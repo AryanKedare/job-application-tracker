@@ -46,6 +46,10 @@ async function accountExists(email: string) {
 }
 
 export async function POST(request: NextRequest) {
+  if (!process.env.NEXT_PUBLIC_ACCESS_REQUEST_EMAIL?.trim()) {
+    return NextResponse.json({ error: 'Access requests are not enabled.' }, { status: 404 })
+  }
+
   const originError = rejectCrossOrigin(request)
   if (originError) return originError
 
