@@ -88,16 +88,19 @@ export default function JobsPage() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { user }, error } = await supabase.auth.getUser()
-      if (error) {
-        showToast('Could not verify your session.', 'error')
-        setLoading(false)
-        return
-      }
-      if (!user) {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session?.user) {
         router.replace('/login')
         return
       }
+
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        await supabase.auth.signOut()
+        router.replace('/login')
+        return
+      }
+
       setUserId(user.id)
       setUserEmail(user.email ?? '')
       setUserName(user.user_metadata?.full_name || user.user_metadata?.name || null)
