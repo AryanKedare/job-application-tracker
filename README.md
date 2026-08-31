@@ -42,7 +42,7 @@ You can:
 - reorder future stages
 - start, complete, skip, or reject at a stage
 - record exactly which round an application was rejected at
-- preserve a timestamped lifecycle history
+- preserve a timestamped, append-only lifecycle history
 - keep one active/current stage per application
 
 Stage history is stored separately from the high-level application status, so an application can remain `Interviewing` while still showing exactly which round it is in.
@@ -62,6 +62,8 @@ Paste a job-posting URL and let the importer fill in:
 
 When `GROQ_API_KEY` is configured, Groq produces structured notes. Without Groq, the app falls back to job-page metadata and JSON-LD where available.
 
+The server-side importer validates public DNS results and pins each outbound connection to the vetted IP address, including every redirect, to prevent DNS-rebinding/TOCTOU access to private network targets.
+
 ### Authentication and admin
 
 - Email/password sign-in
@@ -75,10 +77,11 @@ When `GROQ_API_KEY` is configured, Groq produces structured notes. Without Groq,
 ### Resumes
 
 - Upload PDF resumes up to 5 MB
-- Resume files are stored under each user's folder in the `resumes` bucket
-- The current implementation uses public resume URLs
-
-> For sensitive deployments, consider switching the bucket to private storage and signed URLs.
+- Resume files are stored under each user's folder in the private `resumes` bucket
+- The database stores bucket-relative object paths rather than public URLs
+- Resume downloads use short-lived signed URLs generated for the authenticated owner
+- Failed application saves roll back newly uploaded resume files
+- Replacing a resume cleans up the previous object after the new database reference is saved
 
 ## Technology stack
 
@@ -113,22 +116,27 @@ Create a project in Supabase, then open **Project Settings → API** and copy:
 
 Keep the service-role key server-side only.
 
-### 3. Run the complete database setup
+### 3. Run the database setup and security migration
 
-All database tables, indexes, RLS policies, lifecycle triggers, lifecycle history, and resume storage policies are consolidated into one file:
+All database tables, indexes, RLS policies, lifecycle triggers, lifecycle history, and base resume storage policies are consolidated into:
 
 ```text
 supabase/setup.sql
 ```
 
+Security hardening for private resumes and append-only lifecycle history is in:
+
+```text
+supabase/migrations/20260831_security_hardening.sql
+```
+
 For a **fresh installation**:
 
 1. Open **Supabase → SQL Editor**.
-2. Create a new query.
-3. Copy the full contents of `supabase/setup.sql`.
-4. Run it once.
+2. Run the full contents of `supabase/setup.sql`.
+3. Run the full contents of `supabase/migrations/20260831_security_hardening.sql`.
 
-That single file creates/configures:
+The setup creates/configures:
 
 - `job_applications`
 - `application_stages`
@@ -139,7 +147,14 @@ That single file creates/configures:
 - `resumes` storage bucket
 - resume storage policies
 
-The script is designed to be idempotent, so it can also be run on an existing installation to add the newer lifecycle schema. Existing `Bookmarked` rows are preserved; only the default for newly created applications becomes `Applied`.
+The hardening migration then:
+
+- converts legacy public resume URLs to bucket-relative paths
+- makes the `resumes` bucket private
+- grants authenticated users read access only to their own resume folder
+- makes lifecycle history writeable by database triggers but read-only to normal application users
+
+The scripts are designed to be safe to apply to an existing installation. Existing `Bookmarked` rows are preserved; only the default for newly created applications becomes `Applied`.
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full setup and upgrade guide.
 
@@ -189,7 +204,6 @@ ADMIN_SESSION_SECRET=replace-with-at-least-32-random-characters
 # Optional
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=llama-3.3-70b-versatile
-LOGO_DEV_PUBLISHABLE_KEY=your-logo-dev-publishable-key
 ```
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, or `GROQ_API_KEY` with a `NEXT_PUBLIC_` prefix.
@@ -214,15 +228,14 @@ Open:
 
 ## Existing installation upgrade
 
-If you already have `job_applications` and resume storage configured, you no longer need to apply separate lifecycle SQL snippets.
-
-Run the current:
+For an existing installation, back up production data and then run, in order:
 
 ```text
 supabase/setup.sql
+supabase/migrations/20260831_security_hardening.sql
 ```
 
-The script uses `if not exists`, policy recreation, and safe `alter table ... add column if not exists` operations where appropriate. It will:
+The setup script uses `if not exists`, policy recreation, and safe `alter table ... add column if not exists` operations where appropriate. It will:
 
 - keep existing application rows
 - keep existing `Bookmarked` statuses unchanged
@@ -232,7 +245,7 @@ The script uses `if not exists`, policy recreation, and safe `alter table ... ad
 - add lifecycle triggers and history
 - create a starting history event for pre-existing applications that do not already have lifecycle events
 
-Back up production data before applying schema changes as normal operational practice.
+The security migration preserves applications while converting known legacy public resume URLs to private object paths. Test resume access after applying it.
 
 ## Application lifecycle behaviour
 
@@ -271,6 +284,8 @@ This lets the app show outcomes such as:
 Rejected at: Technical Interview - Round 2
 ```
 
+Lifecycle event rows are append-only for normal users. They are generated by database trigger functions and exposed to the owning user as read-only history.
+
 ## First-time user setup
 
 1. Open `/admin`.
@@ -288,8 +303,9 @@ See [ADMIN_SETUP.md](ADMIN_SETUP.md) for admin-specific configuration.
 3. Set `NEXT_PUBLIC_SITE_URL` to the production domain.
 4. Add that domain to Supabase authentication redirect URLs.
 5. Run `supabase/setup.sql` against the production Supabase project.
-6. Deploy/redeploy.
-7. Test authentication, application creation, stage tracking, resume upload, and deletion flows.
+6. Run `supabase/migrations/20260831_security_hardening.sql`.
+7. Deploy/redeploy.
+8. Test authentication, application creation, stage tracking, private resume upload/download, replacement, and deletion flows.
 
 ## Project structure
 
@@ -298,8 +314,7 @@ app/
 ├── admin/                    Admin dashboard
 ├── api/
 │   ├── admin/                Server-side admin endpoints
-│   ├── company-logo/         Company-logo resolver
-│   └── jobs/import/          Job-page/Groq importer
+│   └── jobs/import/          IP-pinned job-page/Groq importer
 ├── auth/callback/            Supabase auth callback
 ├── jobs/                     Application dashboard
 ├── login/                    User authentication
@@ -318,11 +333,14 @@ lib/
 ├── admin-auth.ts
 ├── admin-request.ts
 ├── admin-supabase.ts
+├── resume-storage.ts
 ├── supabase.ts
 └── types.ts
 
 supabase/
-└── setup.sql                 Canonical one-file database/storage setup
+├── setup.sql                         Base database/storage setup
+└── migrations/
+    └── 20260831_security_hardening.sql
 
 docs/
 └── INSTALLATION.md           Detailed fresh-install and upgrade guide
@@ -333,13 +351,15 @@ docs/
 The project includes:
 
 - Supabase Row-Level Security for applications and stages
-- immutable lifecycle history for normal users
+- append-only lifecycle history for normal users
 - user-scoped queries
 - server-only service-role usage
 - signed admin sessions
 - invitation-only user creation
-- URL/SSRF protections for job imports
+- DNS validation plus IP-pinned outbound connections for job imports
+- private user-scoped resume storage with short-lived signed URLs
 - PDF type and size validation for resumes
+- CSV spreadsheet-formula neutralization
 - Content Security Policy and other security headers
 
 Deployment responsibilities include:
@@ -347,23 +367,23 @@ Deployment responsibilities include:
 - use a long unique admin password
 - keep `.env.local` out of Git
 - never expose the service-role key
+- apply the security migration after the base setup
 - review RLS/storage policies before public use
-- consider private resume storage for sensitive data
 - add rate limiting for larger public deployments
 
 ## Troubleshooting
 
 ### Stage tracking says the schema is missing
 
-Run the complete `supabase/setup.sql` file in the Supabase SQL Editor. After it succeeds, refresh the application.
+Run `supabase/setup.sql` and then `supabase/migrations/20260831_security_hardening.sql` in the Supabase SQL Editor. After both succeed, refresh the application.
 
-### Resume upload fails
+### Resume upload or download fails
 
-Confirm `supabase/setup.sql` completed successfully, the `resumes` bucket exists, the user is authenticated, and the file is a PDF under 5 MB.
+Confirm both SQL files completed successfully, the `resumes` bucket is private, the user is authenticated, and the file is a PDF under 5 MB. The authenticated user must have SELECT/INSERT/UPDATE/DELETE access only to the storage folder matching their user ID.
 
 ### Database request is denied
 
-Confirm Row-Level Security policies were created by `supabase/setup.sql` and that the row belongs to the authenticated user's `user_id`.
+Confirm Row-Level Security policies were created by the SQL scripts and that the row belongs to the authenticated user's `user_id`.
 
 ### AI import returns limited information
 
