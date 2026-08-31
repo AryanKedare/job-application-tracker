@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https://*.supabase.co https://logos.hunter.io",
+              "img-src 'self' data: blob: https://*.supabase.co",
               "font-src 'self'",
               `connect-src 'self' ${process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://*.supabase.co'} https://*.supabase.co wss://*.supabase.co`,
               "frame-src 'none'",
@@ -32,10 +32,7 @@ const nextConfig: NextConfig = {
     ]
   },
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: '*.supabase.co' },
-      { protocol: 'https', hostname: 'logos.hunter.io' },
-    ],
+    remotePatterns: [{ protocol: 'https', hostname: '*.supabase.co' }],
   },
 }
 
