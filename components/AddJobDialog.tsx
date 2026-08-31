@@ -136,6 +136,7 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
     setSubmitting(true)
     let uploadedResumePath: string | null = null
     let applicationOwnsUpload = false
+    let cleanupWarning: string | null = null
 
     try {
       uploadedResumePath = await uploadResume()
@@ -180,13 +181,14 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
           const { error: cleanupError } = await supabase.storage.from('resumes').remove([previousPath])
           if (cleanupError) {
             console.error('Previous resume cleanup failed:', cleanupError)
-            onError('Application updated, but the previous resume file could not be removed.')
+            cleanupWarning = 'Application updated, but the previous resume file could not be removed.'
           }
         }
       }
 
       onSuccess(savedJob)
       setOpen(false)
+      if (cleanupWarning) onError(cleanupWarning)
     } catch {
       if (uploadedResumePath && !applicationOwnsUpload) {
         const { error: cleanupError } = await supabase.storage.from('resumes').remove([uploadedResumePath])
