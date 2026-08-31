@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# environment files - keep only the placeholder example in Git
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -42,6 +43,3 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
-.env
-.env.local
-.env.*.local

@@ -1,5 +1,12 @@
--- Security hardening for existing installations.
--- Apply after supabase/setup.sql (or via Supabase CLI migrations).
+-- LEGACY UPGRADE MIGRATION
+--
+-- Fresh installations do NOT need this file. The current supabase/setup.sql
+-- already includes these secure defaults.
+--
+-- This migration is retained for installations created from an older release
+-- where lifecycle events were user-editable and the resumes bucket was public.
+-- Apply it only when upgrading such an installation without re-running the
+-- current canonical setup.sql.
 
 begin;
 
@@ -7,8 +14,6 @@ begin;
 -- 1. Lifecycle history is append-only for application users
 -- -----------------------------------------------------------------------------
 
--- These trigger functions must write history even though authenticated users can
--- no longer insert/update/delete application_stage_events directly.
 alter function public.log_application_stage_event() security definer;
 alter function public.log_application_stage_event() set search_path = public, pg_temp;
 alter function public.log_application_status_event() security definer;
@@ -22,15 +27,14 @@ drop policy if exists "Users can create their lifecycle events" on public.applic
 drop policy if exists "Users can update their lifecycle events" on public.application_stage_events;
 drop policy if exists "Users can delete their lifecycle events" on public.application_stage_events;
 
-revoke insert, update, delete on table public.application_stage_events from anon, authenticated;
+revoke insert, update, delete on table public.application_stage_events from public, anon, authenticated;
 grant select on table public.application_stage_events to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 2. Private resume storage
 -- -----------------------------------------------------------------------------
 
--- Convert legacy public URLs into bucket-relative object paths before the bucket
--- is made private. New application code stores paths directly.
+-- Convert the legacy Supabase public URL format into bucket-relative object paths.
 update public.job_applications
 set resume_url = regexp_replace(
   resume_url,

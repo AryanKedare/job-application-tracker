@@ -1,11 +1,13 @@
--- Job Application Tracker - complete Supabase setup
+-- Job Application Tracker - canonical Supabase setup
 --
--- Run this entire file once in Supabase SQL Editor for a fresh installation.
--- It is intentionally idempotent and can also be re-run on an existing installation
--- to add the application lifecycle/stage-tracking schema introduced in August 2026.
+-- Public-release setup: run this entire file in Supabase SQL Editor.
+-- It is intentionally idempotent and is the only SQL file required for a fresh
+-- installation. It can also be re-run on an existing installation to bring the
+-- database, lifecycle history, and resume storage policies to the current secure
+-- defaults.
 --
--- Existing Bookmarked applications are preserved. Only the default for NEW
--- applications is changed to Applied.
+-- Existing application rows are preserved. Existing Bookmarked applications are
+-- not changed; only the default for NEW applications is Applied.
 
 begin;
 
@@ -55,6 +57,9 @@ create index if not exists job_applications_user_date_idx
 
 alter table public.job_applications enable row level security;
 
+revoke all on table public.job_applications from anon;
+grant select, insert, update, delete on table public.job_applications to authenticated;
+
 drop policy if exists "Users can read their applications" on public.job_applications;
 drop policy if exists "Users can create their applications" on public.job_applications;
 drop policy if exists "Users can update their applications" on public.job_applications;
@@ -63,23 +68,37 @@ drop policy if exists "Users can delete their applications" on public.job_applic
 create policy "Users can read their applications"
   on public.job_applications
   for select
+  to authenticated
   using (auth.uid() = user_id);
 
 create policy "Users can create their applications"
   on public.job_applications
   for insert
+  to authenticated
   with check (auth.uid() = user_id);
 
 create policy "Users can update their applications"
   on public.job_applications
   for update
+  to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
 create policy "Users can delete their applications"
   on public.job_applications
   for delete
+  to authenticated
   using (auth.uid() = user_id);
+
+-- Convert the legacy public resume URL format into bucket-relative object paths.
+-- New application code stores paths directly in the historical resume_url column.
+update public.job_applications
+set resume_url = regexp_replace(
+  resume_url,
+  '^https?://[^/]+/storage/v1/object/public/resumes/',
+  ''
+)
+where resume_url ~ '^https?://[^/]+/storage/v1/object/public/resumes/';
 
 -- -----------------------------------------------------------------------------
 -- 3. Application stages / interview rounds
@@ -113,6 +132,9 @@ create unique index if not exists application_stages_one_current_idx
 
 alter table public.application_stages enable row level security;
 
+revoke all on table public.application_stages from anon;
+grant select, insert, update, delete on table public.application_stages to authenticated;
+
 drop policy if exists "Users can read their application stages" on public.application_stages;
 drop policy if exists "Users can create their application stages" on public.application_stages;
 drop policy if exists "Users can update their application stages" on public.application_stages;
@@ -121,6 +143,7 @@ drop policy if exists "Users can delete their application stages" on public.appl
 create policy "Users can read their application stages"
   on public.application_stages
   for select
+  to authenticated
   using (
     auth.uid() = user_id
     and exists (
@@ -134,6 +157,7 @@ create policy "Users can read their application stages"
 create policy "Users can create their application stages"
   on public.application_stages
   for insert
+  to authenticated
   with check (
     auth.uid() = user_id
     and exists (
@@ -147,6 +171,7 @@ create policy "Users can create their application stages"
 create policy "Users can update their application stages"
   on public.application_stages
   for update
+  to authenticated
   using (auth.uid() = user_id)
   with check (
     auth.uid() = user_id
@@ -161,6 +186,7 @@ create policy "Users can update their application stages"
 create policy "Users can delete their application stages"
   on public.application_stages
   for delete
+  to authenticated
   using (
     auth.uid() = user_id
     and exists (
@@ -172,7 +198,7 @@ create policy "Users can delete their application stages"
   );
 
 -- -----------------------------------------------------------------------------
--- 4. Lifecycle history
+-- 4. Append-only lifecycle history
 -- -----------------------------------------------------------------------------
 
 create table if not exists public.application_stage_events (
@@ -196,6 +222,11 @@ create index if not exists application_stage_events_user_idx
 
 alter table public.application_stage_events enable row level security;
 
+-- Lifecycle history is generated by trigger functions. Normal application users
+-- may read their own history but cannot insert, rewrite, or delete event rows.
+revoke insert, update, delete on table public.application_stage_events from public, anon, authenticated;
+grant select on table public.application_stage_events to authenticated;
+
 drop policy if exists "Users can read their lifecycle events" on public.application_stage_events;
 drop policy if exists "Users can create their lifecycle events" on public.application_stage_events;
 drop policy if exists "Users can update their lifecycle events" on public.application_stage_events;
@@ -204,6 +235,7 @@ drop policy if exists "Users can delete their lifecycle events" on public.applic
 create policy "Users can read their lifecycle events"
   on public.application_stage_events
   for select
+  to authenticated
   using (
     auth.uid() = user_id
     and exists (
@@ -213,58 +245,6 @@ create policy "Users can read their lifecycle events"
         and j.user_id = auth.uid()
     )
   );
-
-create policy "Users can create their lifecycle events"
-  on public.application_stage_events
-  for insert
-  with check (
-    auth.uid() = user_id
-    and exists (
-      select 1
-      from public.job_applications j
-      where j.id = application_id
-        and j.user_id = auth.uid()
-    )
-  );
-
-create policy "Users can update their lifecycle events"
-  on public.application_stage_events
-  for update
-  using (
-    auth.uid() = user_id
-    and exists (
-      select 1
-      from public.job_applications j
-      where j.id = application_id
-        and j.user_id = auth.uid()
-    )
-  )
-  with check (
-    auth.uid() = user_id
-    and exists (
-      select 1
-      from public.job_applications j
-      where j.id = application_id
-        and j.user_id = auth.uid()
-    )
-  );
-
-create policy "Users can delete their lifecycle events"
-  on public.application_stage_events
-  for delete
-  using (
-    auth.uid() = user_id
-    and exists (
-      select 1
-      from public.job_applications j
-      where j.id = application_id
-        and j.user_id = auth.uid()
-    )
-  );
-
--- History rows are user-editable by design. Editing/deleting a history row changes
--- the recorded timeline only; it does not automatically mutate live application
--- status or application_stages state.
 
 -- -----------------------------------------------------------------------------
 -- 5. Lifecycle trigger functions
@@ -273,7 +253,7 @@ create policy "Users can delete their lifecycle events"
 create or replace function public.set_application_stage_updated_at()
 returns trigger
 language plpgsql
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   new.updated_at = now();
@@ -290,7 +270,8 @@ execute function public.set_application_stage_updated_at();
 create or replace function public.log_application_stage_event()
 returns trigger
 language plpgsql
-set search_path = public
+security definer
+set search_path = public, pg_temp
 as $$
 declare
   v_event_type text;
@@ -345,6 +326,8 @@ begin
 end;
 $$;
 
+revoke execute on function public.log_application_stage_event() from public, anon, authenticated;
+
 drop trigger if exists application_stage_event_log on public.application_stages;
 create trigger application_stage_event_log
 after insert or update on public.application_stages
@@ -354,7 +337,7 @@ execute function public.log_application_stage_event();
 create or replace function public.sync_application_from_stage()
 returns trigger
 language plpgsql
-set search_path = public
+set search_path = public, pg_temp
 as $$
 begin
   if tg_op = 'INSERT' then
@@ -402,7 +385,8 @@ execute function public.sync_application_from_stage();
 create or replace function public.log_application_status_event()
 returns trigger
 language plpgsql
-set search_path = public
+security definer
+set search_path = public, pg_temp
 as $$
 declare
   v_stage_id uuid;
@@ -458,6 +442,8 @@ begin
   return new;
 end;
 $$;
+
+revoke execute on function public.log_application_status_event() from public, anon, authenticated;
 
 drop trigger if exists application_status_event_log_insert on public.job_applications;
 create trigger application_status_event_log_insert
@@ -515,17 +501,14 @@ create index if not exists invite_codes_used_at_idx
 
 alter table public.invite_codes enable row level security;
 
--- Invite codes are never read or written directly from the browser. Only the
--- server-side service-role client may create, validate, claim, or release them.
-revoke all on table public.invite_codes from anon, authenticated;
+-- Invite codes are server-only. Browser roles must never access this table.
+revoke all on table public.invite_codes from public, anon, authenticated;
 grant select, insert, update, delete on table public.invite_codes to service_role;
 
 -- -----------------------------------------------------------------------------
--- 7. Resume storage bucket
+-- 7. Private resume storage bucket
 -- -----------------------------------------------------------------------------
 
--- The current application stores public resume URLs, so the bucket is public.
--- Change the application to signed URLs before making this bucket private.
 insert into storage.buckets (
   id,
   name,
@@ -536,7 +519,7 @@ insert into storage.buckets (
 values (
   'resumes',
   'resumes',
-  true,
+  false,
   5242880,
   array['application/pdf']::text[]
 )
@@ -548,9 +531,9 @@ set name = excluded.name,
 
 alter table storage.objects enable row level security;
 
--- Public buckets do not need a client SELECT policy to serve known object URLs.
--- Remove legacy resume-related SELECT policies so anon/authenticated clients cannot
--- enumerate the bucket. Server-side admin listing uses the service-role client.
+-- Remove legacy resume SELECT policies before installing the canonical owner-only
+-- read policy. This also removes the previous public-release migration policy when
+-- the setup file is re-run.
 do $$
 declare
   resume_select_policy record;
@@ -577,6 +560,15 @@ $$;
 drop policy if exists "Users can upload their resumes" on storage.objects;
 drop policy if exists "Users can update their resumes" on storage.objects;
 drop policy if exists "Users can delete their resumes" on storage.objects;
+
+create policy "Users can read their resumes"
+  on storage.objects
+  for select
+  to authenticated
+  using (
+    bucket_id = 'resumes'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 create policy "Users can upload their resumes"
   on storage.objects
@@ -612,4 +604,4 @@ create policy "Users can delete their resumes"
 commit;
 
 -- Setup complete.
--- Supabase/PostgREST may take a few seconds to expose newly-created tables.
+-- Supabase/PostgREST may take a few seconds to expose newly-created tables/policies.
