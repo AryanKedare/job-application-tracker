@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { supabase } from '@/lib/supabase'
+import { resumeStoragePath } from '@/lib/resume-storage'
 import { JobApplication } from '@/lib/types'
 import { Paperclip, Sparkles, X } from 'lucide-react'
 
@@ -122,7 +123,7 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
     const path = `${userId}/${crypto.randomUUID()}.pdf`
     const { error } = await supabase.storage.from('resumes').upload(path, resumeFile, { upsert: false })
     if (error) throw error
-    return supabase.storage.from('resumes').getPublicUrl(path).data.publicUrl
+    return path
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -131,17 +132,23 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
       setUrlError('Enter a valid http:// or https:// URL.')
       return
     }
+
     setSubmitting(true)
+    let uploadedResumePath: string | null = null
+    let applicationOwnsUpload = false
+
     try {
-      const resumeUrl = await uploadResume()
-      const values = { ...formData, ...(resumeUrl ? { resume_url: resumeUrl } : {}) }
+      uploadedResumePath = await uploadResume()
+      const values = { ...formData, ...(uploadedResumePath ? { resume_url: uploadedResumePath } : {}) }
       const query = editJob
         ? supabase.from('job_applications').update(values).eq('id', editJob.id).eq('user_id', userId)
         : supabase.from('job_applications').insert([{ ...values, user_id: userId }])
       const { data, error } = await query.select().single()
       if (error || !data) throw error
 
+      applicationOwnsUpload = Boolean(uploadedResumePath)
       const savedJob = data as JobApplication
+
       if (!editJob && savedJob.status !== 'Bookmarked') {
         const appliedAt = savedJob.created_at ?? new Date().toISOString()
         const { error: stageError } = await supabase.from('application_stages').insert({
@@ -154,15 +161,37 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
           started_at: appliedAt,
           completed_at: appliedAt,
         })
+
         if (stageError) {
-          await supabase.from('job_applications').delete().eq('id', savedJob.id).eq('user_id', userId)
+          const { error: rollbackError } = await supabase
+            .from('job_applications')
+            .delete()
+            .eq('id', savedJob.id)
+            .eq('user_id', userId)
+
+          if (!rollbackError) applicationOwnsUpload = false
           throw stageError
+        }
+      }
+
+      if (editJob && uploadedResumePath && editJob.resume_url) {
+        const previousPath = resumeStoragePath(editJob.resume_url)
+        if (previousPath && previousPath !== uploadedResumePath) {
+          const { error: cleanupError } = await supabase.storage.from('resumes').remove([previousPath])
+          if (cleanupError) {
+            console.error('Previous resume cleanup failed:', cleanupError)
+            onError('Application updated, but the previous resume file could not be removed.')
+          }
         }
       }
 
       onSuccess(savedJob)
       setOpen(false)
     } catch {
+      if (uploadedResumePath && !applicationOwnsUpload) {
+        const { error: cleanupError } = await supabase.storage.from('resumes').remove([uploadedResumePath])
+        if (cleanupError) console.error('Resume rollback cleanup failed:', cleanupError)
+      }
       onError(editJob ? 'Failed to update application.' : 'Failed to add application.')
     } finally {
       setSubmitting(false)
