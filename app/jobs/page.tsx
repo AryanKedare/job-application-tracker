@@ -172,7 +172,10 @@ export default function JobsTablePage() {
       const path = resumeStoragePath(job.resume_url)
       if (path) {
         const { error: storageError } = await supabase.storage.from('resumes').remove([path])
-        if (storageError) showToast('Application deleted, but its resume file could not be removed.', 'error')
+        if (storageError) {
+          showToast('Application deleted, but its resume file could not be removed.', 'error')
+          return
+        }
       }
     }
     showToast(`Deleted "${job.job_title}".`, 'success')
