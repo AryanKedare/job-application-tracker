@@ -18,7 +18,6 @@ function currentOrigin(): string {
 }
 
 function accessRequestHref(recipient: string, requesterEmail: string): string {
-  const normalizedEmail = requesterEmail.trim().toLowerCase()
   const subject = 'Access request - Job Application Tracker'
   const body = [
     'Hello,',
@@ -26,7 +25,7 @@ function accessRequestHref(recipient: string, requesterEmail: string): string {
     "I'd like to request access to Job Application Tracker.",
     '',
     'Name:',
-    `Email: ${normalizedEmail || '[your email]'}`,
+    `Email: ${requesterEmail}`,
     'Reason for access:',
     '',
     'Thanks.',
@@ -48,9 +47,11 @@ export default function LoginPage() {
   const [sentMessage, setSentMessage] = useState('')
   const [sentEmail, setSentEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const resetFeedback = () => {
     setError(null)
+    setNotice(null)
     setSent(false)
     setSentMessage('')
     setSentEmail('')
@@ -70,11 +71,47 @@ export default function LoginPage() {
         redirectTo: `${currentOrigin()}/reset-password?recovery=1`,
       })
       if (resetError) throw resetError
-      setSentMessage('If this invited account exists, a password reset link has been sent to')
+      setSentMessage('A password reset link has been sent to')
       setSentEmail(normalizedEmail)
       setSent(true)
     } catch {
-      setError('Could not send the reset email. Please try again.')
+      setError('Could not send the password reset email. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleRequestAccess = async () => {
+    resetFeedback()
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!normalizedEmail) {
+      setError('Enter your email address before requesting access.')
+      return
+    }
+    if (!ACCESS_REQUEST_EMAIL) {
+      setError('Access requests are not configured for this deployment.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch('/api/access-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail }),
+      })
+      const result = await response.json() as { exists?: boolean; error?: string }
+      if (!response.ok) throw new Error(result.error || 'Could not check this email address.')
+
+      if (result.exists) {
+        setMethod('password')
+        setNotice('An account already exists for this email. Sign in with your credentials, or reset your password if you no longer remember it.')
+        return
+      }
+
+      window.location.href = accessRequestHref(ACCESS_REQUEST_EMAIL, normalizedEmail)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not check this email address.')
     } finally {
       setLoading(false)
     }
@@ -85,8 +122,12 @@ export default function LoginPage() {
     resetFeedback()
     const normalizedEmail = email.trim().toLowerCase()
 
+    if (!normalizedEmail) {
+      setError('Enter your email address.')
+      return
+    }
     if (method === 'password' && password.length < 12) {
-      setError('Use your password with at least 12 characters.')
+      setError('Enter your password. Passwords are at least 12 characters.')
       return
     }
 
@@ -101,7 +142,7 @@ export default function LoginPage() {
           },
         })
         if (authError) throw authError
-        setSentMessage('If this invited account exists, a secure sign-in link has been sent to')
+        setSentMessage('A secure sign-in link has been sent to')
         setSentEmail(normalizedEmail)
         setSent(true)
         return
@@ -114,7 +155,7 @@ export default function LoginPage() {
       if (authError) throw authError
       window.location.assign('/jobs')
     } catch {
-      setError('Authentication failed. Check your details or use a valid invitation code.')
+      setError('Sign-in failed. Check your email and password, or reset your password.')
     } finally {
       setLoading(false)
     }
@@ -122,9 +163,12 @@ export default function LoginPage() {
 
   const validateInviteCode = async (event: React.FormEvent) => {
     event.preventDefault()
-    setError(null)
+    resetFeedback()
     const code = inviteCode.trim().toUpperCase()
-    if (!code) return setError('Enter your invite code.')
+    if (!code) {
+      setError('Enter your invite code.')
+      return
+    }
 
     setLoading(true)
     try {
@@ -146,11 +190,17 @@ export default function LoginPage() {
 
   const redeemInviteCode = async (event: React.FormEvent) => {
     event.preventDefault()
-    setError(null)
+    resetFeedback()
     const normalizedEmail = inviteEmail.trim().toLowerCase()
     const name = inviteName.trim()
-    if (!name) return setError('Enter your name.')
-    if (!normalizedEmail) return setError('Enter your email address.')
+    if (!name) {
+      setError('Enter your name.')
+      return
+    }
+    if (!normalizedEmail) {
+      setError('Enter your email address.')
+      return
+    }
 
     setLoading(true)
     try {
@@ -174,134 +224,111 @@ export default function LoginPage() {
 
   if (sent) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-4">
-        <div className="w-full max-w-md text-center space-y-4 bg-slate-900/70 rounded-2xl border border-slate-800 p-10">
-          <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
-          <h2 className="text-2xl font-bold">Check your email</h2>
-          <p className="text-slate-400 text-sm">
-            {sentMessage} <span className="text-slate-200 font-medium">{sentEmail}</span>.
-          </p>
-          <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-            If you do not see the email, check your spam or junk folder as well.
-          </p>
-          <button type="button" onClick={() => { setSent(false); setView('signin') }} className="text-xs text-slate-400 hover:text-white underline">
-            Back to sign in
-          </button>
-        </div>
-      </div>
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-50 flex items-center justify-center">
+        <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/70 p-6 sm:p-8 text-center space-y-4">
+          <CheckCircle2 className="mx-auto h-11 w-11 text-emerald-400" />
+          <h1 className="text-2xl font-bold">Check your email</h1>
+          <p className="text-sm text-slate-300">{sentMessage} <span className="font-semibold text-slate-100 break-all">{sentEmail}</span>.</p>
+          <button type="button" onClick={() => { setSent(false); setView('signin') }} className="text-sm font-medium text-blue-400 hover:text-blue-300">Back to sign in</button>
+        </section>
+      </main>
     )
   }
 
   if (view === 'invite-code') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-4">
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-50 flex items-center justify-center">
         <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-violet-600 mb-4"><UserPlus className="w-6 h-6" /></div>
+          <header className="mb-6 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-600"><UserPlus className="h-6 w-6" /></div>
             <h1 className="text-3xl font-black">Join Job Tracker</h1>
-            <p className="text-slate-400 text-sm mt-1">Enter the invite code you received.</p>
-          </div>
-          <form onSubmit={validateInviteCode} className="space-y-5 bg-slate-900/70 rounded-2xl border border-slate-800 p-8">
+            <p className="mt-1 text-sm text-slate-400">Enter the invite code you received.</p>
+          </header>
+          <form onSubmit={validateInviteCode} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 sm:p-8">
             <div className="space-y-2">
               <Label htmlFor="invite-code">Invite code</Label>
-              <Input id="invite-code" required autoComplete="off" value={inviteCode} onChange={(event) => setInviteCode(event.target.value.toUpperCase())} placeholder="JT-..." className="bg-slate-800 border-slate-700 font-mono" />
+              <Input id="invite-code" required autoComplete="off" value={inviteCode} onChange={(event) => setInviteCode(event.target.value.toUpperCase())} className="bg-slate-800 border-slate-700 font-mono" />
             </div>
-            {error && <p role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
-            <Button type="submit" disabled={loading} className="w-full h-11 bg-violet-600 hover:bg-violet-700 font-semibold">{loading ? 'Checking…' : 'Continue'}</Button>
-            <button type="button" onClick={() => { setView('signin'); resetFeedback() }} className="w-full text-xs text-slate-400 hover:text-white underline">Back to sign in</button>
+            {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+            <Button type="submit" disabled={loading} className="h-11 w-full bg-violet-600 hover:bg-violet-700 font-semibold">{loading ? 'Checking…' : 'Continue'}</Button>
+            <button type="button" onClick={() => { setView('signin'); resetFeedback() }} className="w-full text-sm font-medium text-slate-400 hover:text-white">Back to sign in</button>
           </form>
         </div>
-      </div>
+      </main>
     )
   }
 
   if (view === 'invite-details') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-4">
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-50 flex items-center justify-center">
         <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-600 mb-4"><CheckCircle2 className="w-6 h-6" /></div>
+          <header className="mb-6 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600"><CheckCircle2 className="h-6 w-6" /></div>
             <h1 className="text-3xl font-black">Invite accepted</h1>
-            <p className="text-slate-400 text-sm mt-1">Add your details and we will email you a password setup link.</p>
-          </div>
-          <form onSubmit={redeemInviteCode} className="space-y-5 bg-slate-900/70 rounded-2xl border border-slate-800 p-8">
+            <p className="mt-1 text-sm text-slate-400">Add your details to receive a password setup link.</p>
+          </header>
+          <form onSubmit={redeemInviteCode} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 sm:p-8">
             <div className="space-y-2"><Label htmlFor="invite-name">Name</Label><Input id="invite-name" required maxLength={100} autoComplete="name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} className="bg-slate-800 border-slate-700" /></div>
             <div className="space-y-2"><Label htmlFor="invite-email">Email</Label><Input id="invite-email" type="email" required maxLength={254} autoComplete="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="bg-slate-800 border-slate-700" /></div>
-            {error && <p role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
-            <Button type="submit" disabled={loading} className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 font-semibold">{loading ? 'Sending…' : 'Send password setup link'}</Button>
-            <button type="button" onClick={() => { setView('invite-code'); setError(null) }} className="w-full text-xs text-slate-400 hover:text-white underline">Use a different invite code</button>
+            {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+            <Button type="submit" disabled={loading} className="h-11 w-full bg-emerald-600 hover:bg-emerald-700 font-semibold">{loading ? 'Sending…' : 'Send password setup link'}</Button>
+            <button type="button" onClick={() => { setView('invite-code'); resetFeedback() }} className="w-full text-sm font-medium text-slate-400 hover:text-white">Use a different invite code</button>
           </form>
         </div>
-      </div>
+      </main>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-4">
+    <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-50 flex items-center justify-center overflow-x-hidden">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-600 mb-4">
-            {method === 'password' ? <KeyRound className="w-6 h-6" /> : <Mail className="w-6 h-6" />}
+        <header className="mb-6 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600">
+            {method === 'password' ? <KeyRound className="h-6 w-6" /> : <Mail className="h-6 w-6" />}
           </div>
           <h1 className="text-3xl font-black bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Job Tracker</h1>
-          <p className="text-slate-400 text-sm mt-1">Invitation-only access</p>
-        </div>
+          <p className="mt-1 text-sm text-slate-400">Invitation-only access</p>
+        </header>
 
-        <form onSubmit={handleSubmit} className="space-y-5 bg-slate-900/70 rounded-2xl border border-slate-800 p-8">
+        <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 sm:p-8">
           <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-950/60 p-1">
-            <button type="button" onClick={() => { setMethod('password'); resetFeedback() }} className={`rounded-lg py-2 text-xs font-semibold ${method === 'password' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>
-              Password
-            </button>
-            <button type="button" onClick={() => { setMethod('magic-link'); resetFeedback() }} className={`rounded-lg py-2 text-xs font-semibold ${method === 'magic-link' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>
-              Magic link
-            </button>
+            <button type="button" onClick={() => { setMethod('password'); resetFeedback() }} className={`rounded-lg py-2 text-xs font-semibold ${method === 'password' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Password</button>
+            <button type="button" onClick={() => { setMethod('magic-link'); resetFeedback() }} className={`rounded-lg py-2 text-xs font-semibold ${method === 'magic-link' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Magic link</button>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" required maxLength={254} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className="bg-slate-800 border-slate-700" />
+            <Input id="email" type="email" required maxLength={254} autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); setNotice(null); setError(null) }} className="bg-slate-800 border-slate-700" />
           </div>
 
           {method === 'password' && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="password">Password</Label>
-                <button type="button" onClick={handleForgotPassword} disabled={loading} className="text-xs font-medium text-blue-400 hover:text-blue-300 disabled:opacity-50">
-                  Forgot password?
-                </button>
+                <button type="button" onClick={handleForgotPassword} disabled={loading} className="text-xs font-medium text-blue-400 hover:text-blue-300 disabled:opacity-50">Forgot password?</button>
               </div>
               <Input id="password" type="password" required minLength={12} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="bg-slate-800 border-slate-700" />
             </div>
           )}
 
-          {error && <p role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+          {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+          {notice && (
+            <div role="status" className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-200 space-y-3">
+              <p>{notice}</p>
+              <Button type="button" size="sm" variant="outline" onClick={handleForgotPassword} disabled={loading} className="border-emerald-500/30 text-emerald-200">Reset password</Button>
+            </div>
+          )}
 
-          <Button type="submit" disabled={loading} className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-semibold">
+          <Button type="submit" disabled={loading} className="h-11 w-full bg-blue-600 hover:bg-blue-700 font-semibold">
             {loading ? 'Please wait…' : method === 'magic-link' ? 'Send magic link' : 'Sign in'}
           </Button>
 
-          <div className="border-t border-slate-800 pt-4 text-center space-y-2">
-            <p className="text-xs text-slate-500">Have an invite code?</p>
-            <button type="button" onClick={() => { setView('invite-code'); resetFeedback() }} className="text-sm font-semibold text-violet-400 hover:text-violet-300">
-              Create your account
-            </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" variant="outline" onClick={() => { setView('invite-code'); resetFeedback() }} className="border-slate-700 text-violet-300">Use invite code</Button>
+            {ACCESS_REQUEST_EMAIL && <Button type="button" variant="outline" onClick={handleRequestAccess} disabled={loading} className="border-slate-700 text-emerald-300"><Mail className="mr-2 h-4 w-4" />Request access</Button>}
           </div>
-
-          {ACCESS_REQUEST_EMAIL && (
-            <div className="border-t border-slate-800 pt-4 text-center space-y-2">
-              <p className="text-xs text-slate-500">Need an invitation?</p>
-              <a
-                href={accessRequestHref(ACCESS_REQUEST_EMAIL, email)}
-                className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-emerald-400 hover:text-emerald-300"
-              >
-                <Mail className="w-4 h-4" />
-                Request access by email
-              </a>
-              <p className="text-[11px] text-slate-600">Opens your email app with a pre-filled request.</p>
-            </div>
-          )}
         </form>
       </div>
-    </div>
+    </main>
   )
 }
