@@ -141,7 +141,7 @@ Optional access-request contact:
 NEXT_PUBLIC_ACCESS_REQUEST_EMAIL=
 ```
 
-If `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set, the login page shows **Request access by email** and uses that value as the `mailto:` recipient. If it is unset or blank, the link is hidden. Keep deployment-specific contact values in the deployment environment rather than committing them to the repository.
+If `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set, the login page shows **Request access** and uses that value as the `mailto:` recipient after checking whether the submitted email already belongs to a Supabase Auth user. If the variable is unset or blank, the button and `/api/access-request` endpoint are disabled. Keep deployment-specific contact values in the deployment environment rather than committing them to the repository.
 
 Other optional variables:
 
@@ -180,7 +180,14 @@ http://localhost:3000/admin
 
 Sign in to `/admin` using the configured admin credentials and invite the first application user.
 
-If access requests are enabled, test **Request access by email** on `/login`. It should open the device's email handler with the recipient, subject, and access-request body pre-filled. The requester still presses **Send** in their mail client; the application does not send mail directly.
+If access requests are enabled, test both branches of **Request access** on `/login`:
+
+1. Submit an email that already belongs to an invited account. The login page should keep the user on-site and direct them to sign in or reset their password.
+2. Submit an email that is not registered. The device's email handler should open with the recipient, subject, and request body pre-filled.
+
+The requester still presses **Send** in their mail client; the application does not send the access request directly.
+
+The existing-account check is intentionally user-visible. It is same-origin restricted and has best-effort request throttling, but it still reveals whether a submitted email is registered. Leave access requests disabled if that behavior is not appropriate for your deployment.
 
 ## Database model
 
@@ -289,7 +296,7 @@ Before opening the instance to users:
 2. Run `npm run build`.
 3. Confirm production environment variables contain no development credentials.
 4. Confirm Supabase auth redirects reference the production HTTPS origin.
-5. If access requests are enabled, confirm `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set only in the deployment environment and test the mailto flow.
+5. If access requests are enabled, confirm `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set only in the deployment environment and test both registered and unregistered email paths.
 6. Confirm the `resumes` bucket is private.
 7. Upload a resume as one user and verify another user cannot access its object path.
 8. Verify lifecycle history can be read but not directly edited through the authenticated client.
@@ -325,7 +332,7 @@ Check the owner-only Storage SELECT policy and confirm the database contains a b
 
 ### Request access does not appear or open a draft
 
-Confirm `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set in the deployment environment and that the device/browser has a default handler configured for `mailto:` links. The application prepares the draft but does not send email automatically.
+Confirm `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set in the deployment environment. Then confirm the submitted email is not already registered and that the device/browser has a default handler configured for `mailto:` links. Existing accounts intentionally remain on the login page with sign-in and password-reset guidance.
 
 ### Existing jobs disappeared after an upgrade
 
