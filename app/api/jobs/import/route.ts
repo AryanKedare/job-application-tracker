@@ -3,6 +3,8 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 
 export const runtime = 'nodejs'
 
@@ -30,80 +32,156 @@ interface GroqJobResponse {
   preferred_skills?: unknown
 }
 
+interface PublicTarget {
+  url: URL
+  address: string
+  family: 4 | 6
+}
+
+interface PinnedResponse {
+  status: number
+  headers: IncomingHttpHeaders
+  body: Buffer
+}
+
 function isPrivateIp(address: string): boolean {
-  if (address === '::1' || address === '0.0.0.0') return true
-  if (address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe80:')) return true
-  const parts = address.split('.').map(Number)
-  if (parts.length !== 4 || parts.some(Number.isNaN)) return false
-  const [a, b] = parts
+  const normalized = address.toLowerCase()
+  if (normalized === '::' || normalized === '::1' || normalized.startsWith('::ffff:')) return true
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+  if (/^fe[89ab]/.test(normalized) || /^fe[c-f]/.test(normalized) || normalized.startsWith('ff')) return true
+  if (normalized.startsWith('2001:db8:')) return true
+
+  const parts = normalized.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const [a, b, c] = parts
+
   return a === 10 || a === 127 || a === 0 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
     (a === 100 && b >= 64 && b <= 127) ||
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 192 && b === 0 && c === 2) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113) ||
     a >= 224
 }
 
-async function assertPublicUrl(rawUrl: string): Promise<URL> {
+async function resolvePublicTarget(rawUrl: string): Promise<PublicTarget> {
   const url = new URL(rawUrl)
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
     throw new Error('Unsupported URL')
   }
-  if (url.hostname === 'localhost') throw new Error('Private host')
 
-  const addresses = isIP(url.hostname)
-    ? [{ address: url.hostname }]
+  const literalFamily = isIP(url.hostname)
+  const addresses = literalFamily
+    ? [{ address: url.hostname, family: literalFamily }]
     : await lookup(url.hostname, { all: true, verbatim: true })
 
   if (!addresses.length || addresses.some(({ address }) => isPrivateIp(address))) {
     throw new Error('Private address')
   }
-  return url
+
+  const selected = addresses[0]
+  if (selected.family !== 4 && selected.family !== 6) throw new Error('Unsupported address family')
+
+  return { url, address: selected.address, family: selected.family }
 }
 
-async function fetchJobPage(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
-  let current = await assertPublicUrl(rawUrl)
+function headerValue(headers: IncomingHttpHeaders, name: string): string {
+  const value = headers[name.toLowerCase()]
+  return Array.isArray(value) ? value[0] ?? '' : value ?? ''
+}
 
-  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const response = await fetch(current, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+function requestPinned(target: PublicTarget): Promise<PinnedResponse> {
+  return new Promise((resolve, reject) => {
+    const commonOptions = {
+      hostname: target.address,
+      family: target.family,
+      port: target.url.port || undefined,
+      method: 'GET',
+      path: `${target.url.pathname}${target.url.search}`,
       headers: {
+        Host: target.url.host,
         'User-Agent': 'Mozilla/5.0 (compatible; JobApplicationTracker/1.0)',
         Accept: 'text/html,application/xhtml+xml,text/plain;q=0.8',
       },
-    })
+    }
+
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let settled = false
+
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      reject(error)
+    }
+
+    const onResponse = (response: IncomingMessage) => {
+      const chunks: Buffer[] = []
+      let total = 0
+
+      response.on('data', (chunk: Buffer | Uint8Array | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        total += bytes.length
+        if (total > MAX_HTML_BYTES) {
+          response.destroy(new Error('Page too large'))
+          fail(new Error('Page too large'))
+          return
+        }
+        chunks.push(bytes)
+      })
+
+      response.on('end', () => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks),
+        })
+      })
+      response.on('error', fail)
+    }
+
+    const request = target.url.protocol === 'https:'
+      ? httpsRequest({ ...commonOptions, servername: target.url.hostname }, onResponse)
+      : httpRequest(commonOptions, onResponse)
+
+    timer = setTimeout(() => request.destroy(new Error('Request timed out')), REQUEST_TIMEOUT_MS)
+    request.on('error', fail)
+    request.end()
+  })
+}
+
+async function fetchJobPage(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
+  let current = await resolvePublicTarget(rawUrl)
+
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    const response = await requestPinned(current)
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location')
+      const location = headerValue(response.headers, 'location')
       if (!location || redirects === MAX_REDIRECTS) throw new Error('Too many redirects')
-      current = await assertPublicUrl(new URL(location, current).toString())
+      current = await resolvePublicTarget(new URL(location, current.url).toString())
       continue
     }
 
-    if (!response.ok) throw new Error('Page could not be loaded')
-    const contentType = response.headers.get('content-type') ?? ''
+    if (response.status < 200 || response.status >= 300) throw new Error('Page could not be loaded')
+    const contentType = headerValue(response.headers, 'content-type')
     if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
       throw new Error('Unsupported content type')
     }
 
-    const declaredLength = Number(response.headers.get('content-length') ?? 0)
-    if (declaredLength > MAX_HTML_BYTES) throw new Error('Page too large')
-
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('Empty response')
-    const chunks: Uint8Array[] = []
-    let total = 0
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      if (total > MAX_HTML_BYTES) throw new Error('Page too large')
-      chunks.push(value)
+    const declaredLength = Number(headerValue(response.headers, 'content-length') || 0)
+    if (declaredLength > MAX_HTML_BYTES || response.body.byteLength > MAX_HTML_BYTES) {
+      throw new Error('Page too large')
     }
 
-    const html = new TextDecoder().decode(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))))
-    return { html, finalUrl: current.toString() }
+    return { html: new TextDecoder().decode(response.body), finalUrl: current.url.toString() }
   }
 
   throw new Error('Unable to fetch page')
