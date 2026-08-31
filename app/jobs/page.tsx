@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  ArrowLeft, Briefcase, Download, ExternalLink, Filter, ListTree, Pencil, Plus,
-  Search, Settings, StickyNote, Trash2, TrendingUp, Trophy,
+  ArrowLeft, Briefcase, CalendarDays, Download, ExternalLink, Filter, ListTree,
+  MapPin, Pencil, Plus, Search, Settings, StickyNote, Trash2, TrendingUp, Trophy,
 } from 'lucide-react'
 
 import { supabase } from '@/lib/supabase'
@@ -13,6 +13,7 @@ import { resumeStoragePath } from '@/lib/resume-storage'
 import { ApplicationStage, JobApplication } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import AddJobDialog from '@/components/AddJobDialog'
 import ApplicationLifecycleDialog from '@/components/ApplicationLifecycleDialog'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog'
@@ -34,7 +35,7 @@ const STATUS_STYLE: Record<JobApplication['status'], { pill: string; dot: string
 }
 
 function AvatarShell({ children, colorClass = 'bg-white' }: { children: React.ReactNode; colorClass?: string }) {
-  return <div className={`w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10 ${colorClass}`}>{children}</div>
+  return <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10 ${colorClass}`}>{children}</div>
 }
 
 function InitialsAvatar({ name }: { name: string }) {
@@ -60,7 +61,11 @@ function stageSummary(stages: ApplicationStage[], status: JobApplication['status
   return null
 }
 
-export default function JobsTablePage() {
+function formatDate(value?: string | null) {
+  return value ? new Date(value).toLocaleDateString('en-IE', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not set'
+}
+
+export default function JobsPage() {
   const router = useRouter()
   const [authChecked, setAuthChecked] = useState(false)
   const [userId, setUserId] = useState('')
@@ -83,8 +88,16 @@ export default function JobsTablePage() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.replace('/login'); return }
+      const { data: { user }, error } = await supabase.auth.getUser()
+      if (error) {
+        showToast('Could not verify your session.', 'error')
+        setLoading(false)
+        return
+      }
+      if (!user) {
+        router.replace('/login')
+        return
+      }
       setUserId(user.id)
       setUserEmail(user.email ?? '')
       setUserName(user.user_metadata?.full_name || user.user_metadata?.name || null)
@@ -96,12 +109,15 @@ export default function JobsTablePage() {
   const fetchData = useCallback(async (withSpinner = true) => {
     if (!userId) return
     if (withSpinner) setLoading(true)
+
     const [jobsResult, stagesResult] = await Promise.all([
       supabase.from('job_applications').select('id, job_title, company, job_link, status, date_applied, location, source, resume_url, notes, created_at, user_id').eq('user_id', userId).order('date_applied', { ascending: false }),
       supabase.from('application_stages').select('id, application_id, user_id, name, stage_type, position, state, started_at, completed_at, created_at, updated_at').eq('user_id', userId).order('position', { ascending: true }),
     ])
+
     if (jobsResult.error) showToast('Failed to load applications. Please refresh.', 'error')
     else setJobs((jobsResult.data ?? []) as JobApplication[])
+
     if (stagesResult.error) {
       if (stagesResult.error.code !== '42P01' && stagesResult.error.code !== 'PGRST205') showToast('Applications loaded, but lifecycle stages could not be loaded.', 'error')
       setStagesByApplication({})
@@ -113,6 +129,7 @@ export default function JobsTablePage() {
       }, {})
       setStagesByApplication(grouped)
     }
+
     if (withSpinner) setLoading(false)
   }, [userId])
 
@@ -138,8 +155,12 @@ export default function JobsTablePage() {
     }
 
     const { error } = await supabase.from('job_applications').update({ status: newStatus }).eq('id', id).eq('user_id', userId)
-    if (error) showToast('Failed to update status.', 'error')
-    else await fetchData(false)
+    if (error) {
+      showToast('Failed to update status.', 'error')
+      return
+    }
+    await fetchData(false)
+    showToast(`Status changed to ${newStatus}.`, 'success')
   }
 
   const handleOpenResume = async (resumeValue: string) => {
@@ -166,8 +187,14 @@ export default function JobsTablePage() {
     setDeleteDialog({ open: false, job: null })
     setJobs((current) => current.filter((item) => item.id !== job.id))
     setStagesByApplication((current) => { const next = { ...current }; delete next[job.id]; return next })
+
     const { error: dbError } = await supabase.from('job_applications').delete().eq('id', job.id).eq('user_id', userId)
-    if (dbError) { showToast('Failed to delete application.', 'error'); void fetchData(false); return }
+    if (dbError) {
+      showToast('Failed to delete application.', 'error')
+      void fetchData(false)
+      return
+    }
+
     if (job.resume_url) {
       const path = resumeStoragePath(job.resume_url)
       if (path) {
@@ -178,6 +205,7 @@ export default function JobsTablePage() {
         }
       }
     }
+
     showToast(`Deleted "${job.job_title}".`, 'success')
   }
 
@@ -188,30 +216,136 @@ export default function JobsTablePage() {
   }), [jobs])
 
   const filteredJobs = useMemo(() => jobs.filter((job) => {
-    const query = search.toLowerCase()
+    const query = search.trim().toLowerCase()
     const matchesSearch = !query || job.job_title.toLowerCase().includes(query) || (job.company ?? '').toLowerCase().includes(query) || (job.location ?? '').toLowerCase().includes(query) || (stagesByApplication[job.id] ?? []).some((stage) => stage.name.toLowerCase().includes(query))
     return matchesSearch && (statusFilter === 'All' || job.status === statusFilter)
   }), [jobs, search, stagesByApplication, statusFilter])
 
-  if (!authChecked || loading) return <div className="min-h-screen flex items-center justify-center bg-slate-950"><div className="h-8 w-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div>
+  if (!authChecked || loading) {
+    return <main className="min-h-screen bg-slate-950 flex items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" /></main>
+  }
 
-  return <>
-    <div className="min-h-screen bg-slate-950 text-slate-100"><div className="w-full max-w-[1780px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8 space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"><div className="flex items-center gap-3"><Link href="/"><Button variant="outline" size="icon" className="rounded-full border-slate-700 bg-slate-900"><ArrowLeft className="w-4 h-4" /></Button></Link><div><h1 className="text-3xl md:text-4xl font-bold">Applications</h1><p className="text-sm text-slate-500">{jobs.length} tracked &bull; {filteredJobs.length} shown</p></div></div><div className="flex gap-2 flex-wrap"><Button onClick={() => setAddOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold"><Plus className="w-4 h-4 mr-2" />Add application</Button><Button variant="outline" size="icon" className="border-slate-700" onClick={() => setSettingsOpen(true)}><Settings className="w-4 h-4" /></Button><Button variant="outline" className="border-slate-700" onClick={async () => { await supabase.auth.signOut(); router.replace('/login') }}>Sign out</Button></div></div>
+  return (
+    <>
+      <main className="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100">
+        <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <Button asChild variant="outline" size="icon" className="flex-shrink-0 rounded-full border-slate-700 bg-slate-900">
+                <Link href="/" aria-label="Back to home"><ArrowLeft className="h-4 w-4" /></Link>
+              </Button>
+              <div className="min-w-0">
+                <h1 className="text-3xl font-bold sm:text-4xl">Applications</h1>
+                <p className="text-sm text-slate-500">{jobs.length} tracked · {filteredJobs.length} shown</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setAddOpen(true)} className="bg-emerald-500 font-semibold text-slate-950 hover:bg-emerald-600"><Plus className="mr-2 h-4 w-4" />Add application</Button>
+              <Button variant="outline" size="icon" className="border-slate-700" onClick={() => setSettingsOpen(true)} aria-label="Account settings"><Settings className="h-4 w-4" /></Button>
+              <Button variant="outline" className="border-slate-700" onClick={async () => { const { error } = await supabase.auth.signOut(); if (error) showToast('Could not sign out.', 'error'); else router.replace('/login') }}>Sign out</Button>
+            </div>
+          </header>
 
-      <div className="grid grid-cols-3 gap-3">{[['Applied', stats.applied, Briefcase, 'text-blue-400'], ['Interviewing', stats.interviewing, TrendingUp, 'text-yellow-400'], ['Offers', stats.offer, Trophy, 'text-emerald-400']].map(([label, count, Icon, color]) => { const StatusIcon = Icon as typeof Briefcase; return <div key={String(label)} className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3"><StatusIcon className={`w-4 h-4 ${String(color)}`} /><div><div className="text-xl font-bold">{String(count)}</div><div className="text-xs text-slate-400">{String(label)}</div></div></div> })}</div>
+          <section className="grid grid-cols-3 gap-2 sm:gap-3">
+            {[
+              ['Applied', stats.applied, Briefcase, 'text-blue-400'],
+              ['Interviewing', stats.interviewing, TrendingUp, 'text-yellow-400'],
+              ['Offers', stats.offer, Trophy, 'text-emerald-400'],
+            ].map(([label, count, Icon, color]) => {
+              const StatusIcon = Icon as typeof Briefcase
+              return (
+                <div key={String(label)} className="min-w-0 rounded-xl border border-slate-800 bg-slate-900 px-3 py-3 sm:flex sm:items-center sm:gap-3 sm:rounded-2xl sm:px-4">
+                  <StatusIcon className={`h-4 w-4 ${String(color)}`} />
+                  <div className="mt-2 min-w-0 sm:mt-0"><div className="text-xl font-bold">{String(count)}</div><div className="truncate text-[11px] text-slate-400 sm:text-xs">{String(label)}</div></div>
+                </div>
+              )
+            })}
+          </section>
 
-      <div className="flex flex-col sm:flex-row gap-3"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by role, company, location, or interview stage…" className="pl-9 bg-slate-900 border-slate-700" /></div><div className="flex items-center gap-2"><Filter className="w-4 h-4 text-slate-500" /><div className="flex gap-1.5 flex-wrap">{(['All', ...STATUS_OPTIONS] as const).map((status) => <button key={status} onClick={() => setStatusFilter(status)} className={`text-xs px-3 py-1.5 rounded-full border ${statusFilter === status ? 'bg-slate-100 text-slate-900 border-slate-100' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>{status}</button>)}</div></div></div>
+          <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <div className="space-y-2">
+                <Label htmlFor="application-search">Search applications</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <Input id="application-search" value={search} onChange={(event) => setSearch(event.target.value)} className="bg-slate-950 border-slate-700 pl-9" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-300"><Filter className="h-4 w-4 text-slate-500" />Status</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(['All', ...STATUS_OPTIONS] as const).map((status) => (
+                    <button key={status} type="button" onClick={() => setStatusFilter(status)} className={`rounded-full border px-3 py-1.5 text-xs ${statusFilter === status ? 'border-slate-100 bg-slate-100 text-slate-900' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
 
-      {filteredJobs.length === 0 ? <div className="text-center py-20 rounded-2xl border border-dashed border-slate-700 text-slate-400">{jobs.length ? 'No results found.' : 'No applications yet.'}</div> : <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1280px] table-fixed text-sm"><colgroup><col className="w-[15%]" /><col className="w-[20%]" /><col className="w-[9%]" /><col className="w-[10%]" /><col className="w-[16%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[5%]" /></colgroup><thead><tr className="border-b border-slate-800 text-left text-xs text-slate-500 uppercase"><th className="px-4 py-3.5">Company</th><th className="px-4 py-3.5">Role</th><th className="px-4 py-3.5">Location</th><th className="px-4 py-3.5">Status</th><th className="px-4 py-3.5">Stage</th><th className="px-4 py-3.5">Apply</th><th className="px-4 py-3.5">Resume</th><th className="px-4 py-3.5">Notes</th><th className="px-4 py-3.5">Date</th><th /></tr></thead><tbody className="divide-y divide-slate-800/70">{filteredJobs.map((job) => { const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status); return <tr key={job.id} className="group hover:bg-slate-800/40"><td className="px-4 py-3.5"><div className="flex min-w-0 items-center gap-3"><InitialsAvatar name={job.company || job.job_title} /><span className="min-w-0 truncate font-medium">{job.company || '—'}</span></div></td><td className="px-4 py-3.5"><div className="truncate font-semibold">{job.job_title}</div></td><td className="px-4 py-3.5"><div className="truncate text-slate-400">{job.location || '—'}</div></td><td className="px-4 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} className={`appearance-none text-xs font-semibold rounded-full pl-5 pr-3 py-1 ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td><td className="px-4 py-3.5"><button onClick={() => setLifecycleDialog({ open: true, job })} className="flex min-w-0 max-w-full items-center gap-2 text-left"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="text-xs text-blue-400">Add stages</span>}</button></td><td className="px-4 py-3.5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400">Link<ExternalLink className="w-3 h-3" /></a> : '—'}</td><td className="px-4 py-3.5">{job.resume_url ? <button type="button" onClick={() => void handleOpenResume(job.resume_url!)} className="inline-flex items-center gap-1"><Download className="w-3 h-3" />CV</button> : '—'}</td><td className="px-4 py-3.5">{job.notes?.trim() ? <button onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 text-amber-400"><StickyNote className="w-3 h-3" />View</button> : '—'}</td><td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td><td className="px-2 py-3.5"><div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100"><button onClick={() => setEditDialog({ open: true, job })} className="p-1.5"><Pencil className="w-3.5 h-3.5" /></button><button onClick={() => setDeleteDialog({ open: true, job })} className="p-1.5 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button></div></td></tr> })}</tbody></table></div></div>}
-    </div></div>
+          {filteredJobs.length === 0 ? (
+            <section className="rounded-2xl border border-dashed border-slate-700 px-5 py-14 text-center">
+              <Briefcase className="mx-auto h-10 w-10 text-slate-600" />
+              <h2 className="mt-4 text-lg font-semibold">{jobs.length ? 'No matching applications' : 'No applications yet'}</h2>
+              <p className="mt-1 text-sm text-slate-500">{jobs.length ? 'Change the search or status filter.' : 'Create your first application to start tracking it.'}</p>
+              {!jobs.length && <Button onClick={() => setAddOpen(true)} className="mt-5 bg-emerald-500 text-slate-950 hover:bg-emerald-600"><Plus className="mr-2 h-4 w-4" />Add application</Button>}
+            </section>
+          ) : (
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filteredJobs.map((job) => {
+                const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status)
+                return (
+                  <article key={job.id} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <InitialsAvatar name={job.company || job.job_title} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm text-slate-400">{job.company || 'Company not set'}</p>
+                        <h2 className="break-words text-lg font-semibold leading-snug text-slate-100">{job.job_title}</h2>
+                      </div>
+                      <div className="flex flex-shrink-0 gap-1">
+                        <button type="button" onClick={() => setEditDialog({ open: true, job })} aria-label={`Edit ${job.job_title}`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"><Pencil className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => setDeleteDialog({ open: true, job })} aria-label={`Delete ${job.job_title}`} className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </div>
 
-    <AddJobDialog open={addOpen} setOpen={setAddOpen} userId={userId} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => [job, ...current]); showToast('Application added!', 'success') }} />
-    {editDialog.job && <AddJobDialog open={editDialog.open} setOpen={(open) => setEditDialog({ open, job: editDialog.job })} userId={userId} editJob={editDialog.job} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => current.map((item) => item.id === job.id ? job : item)); setEditDialog({ open: false, job: null }); showToast('Updated!', 'success') }} />}
-    {lifecycleDialog.job && <ApplicationLifecycleDialog open={lifecycleDialog.open} setOpen={(open) => setLifecycleDialog((current) => ({ ...current, open }))} job={jobs.find((item) => item.id === lifecycleDialog.job?.id) ?? lifecycleDialog.job} userId={userId} onChanged={() => fetchData(false)} onError={(message) => showToast(message, 'error')} />}
-    <DeleteConfirmDialog open={deleteDialog.open} jobTitle={deleteDialog.job?.job_title ?? ''} company={deleteDialog.job?.company ?? ''} onConfirm={() => void handleDeleteConfirm()} onCancel={() => setDeleteDialog({ open: false, job: null })} />
-    <AccountSettingsDialog open={settingsOpen} setOpen={setSettingsOpen} jobs={jobs} userId={userId} userEmail={userEmail} userName={userName} onDataDeleted={() => { setJobs([]); setStagesByApplication({}); showToast('All data deleted.', 'success') }} />
-    <Dialog open={notesDialog.open} onOpenChange={(open) => setNotesDialog((current) => ({ ...current, open }))}><DialogContent className="max-w-lg bg-slate-900 border-slate-700 text-slate-100"><DialogHeader><DialogTitle>{notesDialog.jobTitle}{notesDialog.company && ` — ${notesDialog.company}`}</DialogTitle></DialogHeader><p className="text-sm text-slate-300 whitespace-pre-wrap">{notesDialog.notes}</p></DialogContent></Dialog>
-    {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
-  </>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <div className="relative inline-block">
+                        <select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} aria-label={`Status for ${job.job_title}`} className={`appearance-none rounded-full py-1 pl-5 pr-3 text-xs font-semibold ${STATUS_STYLE[job.status].pill}`}>
+                          {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+                        </select>
+                        <span className={`absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full ${STATUS_STYLE[job.status].dot}`} />
+                      </div>
+                      <button type="button" onClick={() => setLifecycleDialog({ open: true, job })} className="min-w-0 flex-1 rounded-full border border-slate-700 bg-slate-950/50 px-3 py-1.5 text-left hover:border-slate-600">
+                        <span className="flex min-w-0 items-center gap-2"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="truncate text-xs font-medium text-blue-400">Set interview stages</span>}</span>
+                      </button>
+                    </div>
+
+                    <dl className="mt-4 grid gap-2 text-sm text-slate-400">
+                      <div className="flex min-w-0 items-center gap-2"><MapPin className="h-4 w-4 flex-shrink-0 text-slate-600" /><dd className="truncate">{job.location || 'Location not set'}</dd></div>
+                      <div className="flex min-w-0 items-center gap-2"><CalendarDays className="h-4 w-4 flex-shrink-0 text-slate-600" /><dd>{formatDate(job.date_applied)}</dd></div>
+                    </dl>
+
+                    <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-4">
+                      {job.job_link && <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-blue-300 hover:bg-slate-800">Job link <ExternalLink className="h-3.5 w-3.5" /></a>}
+                      {job.resume_url && <button type="button" onClick={() => void handleOpenResume(job.resume_url!)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800"><Download className="h-3.5 w-3.5" />Resume</button>}
+                      {job.notes?.trim() && <button type="button" onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:bg-slate-800"><StickyNote className="h-3.5 w-3.5" />Notes</button>}
+                    </div>
+                  </article>
+                )
+              })}
+            </section>
+          )}
+        </div>
+      </main>
+
+      <AddJobDialog open={addOpen} setOpen={setAddOpen} userId={userId} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => [job, ...current]); showToast('Application added.', 'success') }} />
+      {editDialog.job && <AddJobDialog open={editDialog.open} setOpen={(open) => setEditDialog({ open, job: editDialog.job })} userId={userId} editJob={editDialog.job} onError={(message) => showToast(message, 'error')} onSuccess={(job) => { setJobs((current) => current.map((item) => item.id === job.id ? job : item)); setEditDialog({ open: false, job: null }); showToast('Application updated.', 'success') }} />}
+      {lifecycleDialog.job && <ApplicationLifecycleDialog open={lifecycleDialog.open} setOpen={(open) => setLifecycleDialog((current) => ({ ...current, open }))} job={jobs.find((item) => item.id === lifecycleDialog.job?.id) ?? lifecycleDialog.job} userId={userId} onChanged={() => fetchData(false)} onError={(message) => showToast(message, 'error')} onSuccess={(message) => showToast(message, 'success')} />}
+      <DeleteConfirmDialog open={deleteDialog.open} jobTitle={deleteDialog.job?.job_title ?? ''} company={deleteDialog.job?.company ?? ''} onConfirm={() => void handleDeleteConfirm()} onCancel={() => setDeleteDialog({ open: false, job: null })} />
+      <AccountSettingsDialog open={settingsOpen} setOpen={setSettingsOpen} jobs={jobs} userId={userId} userEmail={userEmail} userName={userName} onDataDeleted={() => { setJobs([]); setStagesByApplication({}); showToast('All data deleted.', 'success') }} />
+      <Dialog open={notesDialog.open} onOpenChange={(open) => setNotesDialog((current) => ({ ...current, open }))}><DialogContent className="max-w-lg bg-slate-900 border-slate-700 text-slate-100"><DialogHeader><DialogTitle className="break-words">{notesDialog.jobTitle}{notesDialog.company && ` — ${notesDialog.company}`}</DialogTitle></DialogHeader><p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words text-sm text-slate-300">{notesDialog.notes}</p></DialogContent></Dialog>
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
+    </>
+  )
 }
