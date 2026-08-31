@@ -2,70 +2,56 @@
 
 This project uses Supabase for PostgreSQL, authentication, and private resume storage.
 
-Database installation has two ordered steps:
+For a fresh installation, there is one canonical database/storage setup file:
 
 ```text
 supabase/setup.sql
-supabase/migrations/20260831_security_hardening.sql
 ```
 
-Do not copy older SQL snippets from issues, commits, or previous README versions.
+Do not assemble a new installation from SQL snippets in issues, old commits, or historical documentation.
 
 ## Fresh installation
 
-### 1. Create the Supabase project
+### 1. Create a Supabase project
 
-Create a new Supabase project and wait until the database is ready.
+Create a new Supabase project and wait for the database to become available.
 
-From **Project Settings → API**, record:
+From the Supabase project settings, record:
 
 - Project URL
 - anon/public key
 - service-role key
 
-The service-role key is server-only and must never be exposed to browser code.
+The service-role key bypasses Row-Level Security and must remain server-side.
 
-### 2. Run the complete SQL setup
+### 2. Run `supabase/setup.sql`
 
-Open **Supabase → SQL Editor** and create a new query.
-
-First, copy and run the entire contents of:
+Open **Supabase → SQL Editor**, create a new query, paste the complete contents of:
 
 ```text
 supabase/setup.sql
 ```
 
-Then copy and run:
+Run the query once.
 
-```text
-supabase/migrations/20260831_security_hardening.sql
-```
-
-The base setup configures:
+The setup file creates/configures:
 
 - `public.job_applications`
 - `public.application_stages`
 - `public.application_stage_events`
-- indexes
-- application Row-Level Security policies
-- stage Row-Level Security policies
-- lifecycle trigger functions
-- application/status event logging
-- interview-stage status synchronisation
-- `resumes` storage bucket
-- 5 MB PDF restriction for the resume bucket
-- per-user resume upload/update/delete policies
+- `public.invite_codes`
+- indexes and constraints
+- application/stage Row-Level Security
+- append-only lifecycle history
+- lifecycle/status trigger functions
+- the private `resumes` Storage bucket
+- 5 MB PDF-only resume restrictions
+- owner-scoped resume SELECT/INSERT/UPDATE/DELETE policies
+- conversion of recognized legacy public resume URLs into bucket-relative paths
 
-The security migration then:
+The file is intentionally re-runnable and is also the preferred upgrade path for existing installations.
 
-- migrates known legacy public resume URLs to bucket-relative paths
-- makes the `resumes` bucket private
-- adds per-user SELECT access required for signed resume URLs
-- converts lifecycle history to trigger-written, read-only data for normal users
-
-After the queries succeed, Supabase/PostgREST may take a few seconds to expose newly-created tables and policies.
-
-### 3. Verify the schema
+### 3. Verify the secure database state
 
 In **Table Editor**, confirm these tables exist:
 
@@ -73,19 +59,37 @@ In **Table Editor**, confirm these tables exist:
 job_applications
 application_stages
 application_stage_events
+invite_codes
 ```
 
-In **Storage**, confirm the `resumes` bucket exists and is **private**.
+In **Storage**, confirm:
+
+```text
+Bucket: resumes
+Public: false
+File size limit: 5 MB
+Allowed MIME type: application/pdf
+```
+
+The expected application security model is:
+
+- authenticated users can access only their own `job_applications`
+- authenticated users can access stages only for their own applications
+- authenticated users can read their lifecycle history but cannot directly insert/update/delete event rows
+- invite-code storage is server/service-role only
+- authenticated users can access resume objects only when the top-level storage folder equals their Supabase user ID
+
+Supabase/PostgREST may take a few seconds to refresh its schema cache after setup.
 
 ### 4. Configure authentication URLs
 
-For local development, set:
+For local development:
 
 ```text
 Site URL: http://localhost:3000
 ```
 
-Add redirect URLs:
+Add redirect URLs such as:
 
 ```text
 http://localhost:3000/**
@@ -93,23 +97,31 @@ http://localhost:3000/auth/callback
 http://localhost:3000/reset-password**
 ```
 
-For production, replace `http://localhost:3000` with the deployed domain.
+For production, use the deployed HTTPS origin instead of `localhost` and remove development-only origins you do not need.
 
-### 5. Configure email templates
+### 5. Configure authentication email templates
 
-Use Supabase's generated confirmation URL in password-reset, invitation, and magic-link emails.
+Password recovery, invitation, and magic-link emails should use Supabase-generated confirmation URLs rather than a hard-coded application URL.
 
-For password recovery:
+For password recovery, for example:
 
 ```html
 <a href="{{ .ConfirmationURL }}">Reset password</a>
 ```
 
-Do not hardcode the site URL into the reset link.
+After changing authentication URL/template settings, generate a new email before testing again because previously generated links retain their old destination.
 
 ### 6. Configure environment variables
 
-Create `.env.local`:
+Copy the committed example file:
+
+```bash
+cp .env.example .env.local
+```
+
+Then replace every placeholder.
+
+Required variables:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -120,55 +132,63 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=replace-with-a-long-random-password
-ADMIN_SESSION_SECRET=replace-with-at-least-32-random-characters
-
-# Optional AI import
-GROQ_API_KEY=your-groq-api-key
-GROQ_MODEL=llama-3.3-70b-versatile
+ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
 ```
 
-Never prefix these with `NEXT_PUBLIC_`:
+Optional access-request contact:
+
+```env
+NEXT_PUBLIC_ACCESS_REQUEST_EMAIL=
+```
+
+If `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set, the login page shows **Request access by email** and uses that value as the `mailto:` recipient. If it is unset or blank, the link is hidden. Keep deployment-specific contact values in the deployment environment rather than committing them to the repository.
+
+Other optional variables:
+
+```env
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
+MAINTENANCE_MODE=false
+```
+
+Never use a `NEXT_PUBLIC_` prefix for:
 
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 - `GROQ_API_KEY`
 
-## Upgrading an existing installation
+Generate a strong admin session secret with:
 
-Before changing a production database, take a backup according to your normal operational process.
-
-Run these files in order:
-
-```text
-supabase/setup.sql
-supabase/migrations/20260831_security_hardening.sql
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-The setup script is designed to be re-runnable. For older databases it will:
+### 7. Install and run the app
 
-- preserve all existing `job_applications` rows
-- preserve existing `Bookmarked` applications
-- change the default for **new** applications from `Bookmarked` to `Applied`
-- add `jd_text` if missing
-- add `rejected_at` if missing
-- add `rejected_stage_name` if missing
-- create `application_stages` if missing
-- create `application_stage_events` if missing
-- recreate the base RLS policies
-- create/update lifecycle triggers
-- ensure the `resumes` bucket and storage policies are configured
-- create one `application_imported` lifecycle event for older applications that have no lifecycle history yet
+```bash
+npm install
+npm run dev
+```
 
-The security migration then applies the current private-storage and append-only-history model. It does **not** delete application rows or turn existing bookmarked jobs into applied jobs.
+Open:
 
-## Lifecycle data model
+```text
+http://localhost:3000
+http://localhost:3000/admin
+```
+
+Sign in to `/admin` using the configured admin credentials and invite the first application user.
+
+If access requests are enabled, test **Request access by email** on `/login`. It should open the device's email handler with the recipient, subject, and access-request body pre-filled. The requester still presses **Send** in their mail client; the application does not send mail directly.
+
+## Database model
 
 ### `job_applications`
 
 Stores the high-level application state and job details.
 
-Typical statuses:
+Supported status values are:
 
 ```text
 Bookmarked
@@ -179,19 +199,11 @@ Rejected
 Ghosted
 ```
 
+New rows default to `Applied`. Re-running setup does not convert existing `Bookmarked` rows.
+
 ### `application_stages`
 
-Stores the ordered interview/assessment pipeline for one application.
-
-Examples:
-
-```text
-Recruiter Screening
-Coding Assessment
-Technical Interview - Round 1
-Technical Interview - Round 2
-Final Interview
-```
+Stores the ordered interview/assessment pipeline for an application.
 
 Stage states are:
 
@@ -207,9 +219,7 @@ A partial unique index ensures an application has at most one `current` stage.
 
 ### `application_stage_events`
 
-Stores lifecycle history and stage-name snapshots.
-
-Examples:
+Stores lifecycle history and stage-name snapshots, including events such as:
 
 ```text
 application_created
@@ -223,55 +233,100 @@ stage_renamed
 status_changed
 ```
 
-Normal authenticated users can read lifecycle history but cannot insert, update, or delete event rows directly. Security-definer trigger functions append history as application and stage operations occur.
+Normal authenticated users receive SELECT access to their own event rows only. Logging trigger functions run as `SECURITY DEFINER` with an explicit `public, pg_temp` search path so the application can append history without granting users direct history-table write privileges.
+
+### `invite_codes`
+
+Stores SHA-256 invite-code hashes, expiry timestamps, and one-time-use state. Browser roles have no direct access; the server-side service-role client performs invite-code operations.
 
 ## Resume storage
 
-After the security migration, the `resumes` bucket has:
+The `resumes` bucket is private and accepts PDF files up to 5 MB.
 
-- private access
-- 5 MB file limit
-- `application/pdf` MIME restriction
-- user-specific object paths such as `<user-id>/<uuid>.pdf`
-- authenticated SELECT/INSERT/UPDATE/DELETE policies restricted to the user's own top-level folder
+Objects are stored under paths such as:
 
-`job_applications.resume_url` stores the bucket-relative object path for new uploads. The migration converts the previous Supabase public URL format when it recognizes it. The UI creates a short-lived signed URL only when the authenticated owner opens a resume.
+```text
+<user-id>/<uuid>.pdf
+```
 
-## Re-running the SQL
+The historical `job_applications.resume_url` column stores that bucket-relative object path for new uploads. The client creates a short-lived signed URL when the authenticated owner opens a resume.
 
-`supabase/setup.sql` uses idempotent patterns wherever practical, including:
+The setup file recognizes the previous Supabase public-object URL form and converts it to the object path when upgrading an older installation.
 
-- `create ... if not exists`
-- `add column if not exists`
-- `create or replace function`
-- dropping/recreating named policies and triggers
-- `on conflict` for the resume bucket
-- guarded import of lifecycle history
+## Upgrading an existing installation
 
-After re-running `setup.sql`, re-run `supabase/migrations/20260831_security_hardening.sql` so the security overrides remain the final state.
+Before changing a production database, take a backup according to your normal operational process.
+
+The preferred upgrade path is to run the current complete:
+
+```text
+supabase/setup.sql
+```
+
+It is designed to preserve existing application rows while bringing the schema and policies to the current state. Depending on the age of the installation, it can:
+
+- add missing lifecycle/rejection columns
+- create lifecycle tables and indexes
+- recreate the current RLS policies
+- recreate lifecycle/status triggers
+- import one starting lifecycle event for applications with no history
+- convert recognized legacy public resume URLs to object paths
+- enforce private resume storage and owner-only policies
+
+It does **not** deliberately delete application rows or turn existing bookmarked roles into applied applications.
+
+### Legacy hardening migration
+
+`supabase/migrations/20260831_security_hardening.sql` is retained for deployments created from an older release.
+
+Fresh installations do not need it. Use it only if you intentionally want to apply the original privacy/history hardening without re-running the current canonical `setup.sql`.
+
+## Production deployment verification
+
+Before opening the instance to users:
+
+1. Run `npm run lint`.
+2. Run `npm run build`.
+3. Confirm production environment variables contain no development credentials.
+4. Confirm Supabase auth redirects reference the production HTTPS origin.
+5. If access requests are enabled, confirm `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set only in the deployment environment and test the mailto flow.
+6. Confirm the `resumes` bucket is private.
+7. Upload a resume as one user and verify another user cannot access its object path.
+8. Verify lifecycle history can be read but not directly edited through the authenticated client.
+9. Test invitation, password recovery, and magic-link flows.
+10. Test account/data deletion, including resume object removal.
+11. Back up the database before future schema upgrades.
+
+For additional release checks, see [PUBLIC_RELEASE.md](PUBLIC_RELEASE.md).
 
 ## Troubleshooting
 
 ### Stage tracking reports missing tables
 
-Run both SQL files in order, confirm they complete successfully, wait a few seconds for the schema cache, and refresh the app.
+Run the current complete `supabase/setup.sql`, wait a few seconds for the Supabase schema cache to refresh, then reload the application.
 
 ### Permission denied / RLS error
 
-Re-run both SQL files and verify the authenticated user owns the application row (`user_id`).
+Confirm the authenticated user's `auth.uid()` matches the relevant `user_id`, and re-run the current setup file to recreate the canonical policies.
 
-### Resume uploads or downloads fail
+### Resume upload fails
 
 Check that:
 
 - the `resumes` bucket exists and is private
-- the security migration has been applied
 - the user is authenticated
-- the object path begins with the user's ID
-- the user has the per-folder storage SELECT policy
+- the object path begins with the authenticated user's ID
 - the file is a PDF
 - the file is no larger than 5 MB
 
-### Existing jobs disappeared after upgrade
+### Resume download fails
 
-The provided SQL does not delete job application rows. Stop changes and inspect the database/audit logs before running unrelated cleanup queries.
+Check the owner-only Storage SELECT policy and confirm the database contains a bucket-relative object path rather than a stale external/public URL.
+
+### Request access does not appear or open a draft
+
+Confirm `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is set in the deployment environment and that the device/browser has a default handler configured for `mailto:` links. The application prepares the draft but does not send email automatically.
+
+### Existing jobs disappeared after an upgrade
+
+The provided setup does not intentionally delete job application rows. Stop further changes and inspect the database/audit logs and backups before running unrelated cleanup queries.

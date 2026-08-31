@@ -1,87 +1,52 @@
 # Job Application Tracker
 
-A modern, self-hosted job application tracker built with **Next.js**, **Supabase**, **Tailwind CSS**, and optional **Groq AI**.
+A self-hosted job application tracker built with **Next.js**, **Supabase**, **Tailwind CSS**, and optional **Groq AI**.
 
 Track applications, interview rounds, assessments, resumes, notes, lifecycle history, and outcomes in one place.
 
-> Designed for private or small-team use. User registration is invitation-only.
+> Registration is invitation-only. The login page can optionally open a pre-filled access-request email for users who do not yet have an invite.
 
 ## Features
 
 ### Job tracking
 
 - Add, edit, and delete job applications
-- Track top-level statuses: `Bookmarked`, `Applied`, `Interviewing`, `Offer`, `Rejected`, and `Ghosted`
-- New applications default to `Applied`
-- Keep `Bookmarked` for roles you saved but have not applied to yet
-- Save company, role, location, source, job link, date, notes, and resume
+- Track `Bookmarked`, `Applied`, `Interviewing`, `Offer`, `Rejected`, and `Ghosted`
 - Search by company, role, location, or interview stage
 - Filter by application status
-- Live statistics for applications, interviews, and offers
+- Store job links, source, notes, dates, and resumes
+- View lightweight application/interview/offer statistics
 
-### Application lifecycle and interview stages
+### Application lifecycle
 
-Each application can have its own ordered pipeline instead of being limited to generic statuses.
-
-Examples:
-
-```text
-Applied
-Recruiter Screening
-Coding Assessment
-Technical Interview - Round 1
-Technical Interview - Round 2
-Hiring Manager Interview
-Final Interview
-```
-
-You can:
-
-- add unlimited interview/assessment stages
-- use built-in stage templates or custom names
-- reorder future stages
-- start, complete, skip, or reject at a stage
-- record exactly which round an application was rejected at
-- preserve a timestamped, append-only lifecycle history
-- keep one active/current stage per application
-
-Stage history is stored separately from the high-level application status, so an application can remain `Interviewing` while still showing exactly which round it is in.
+Each application can have its own ordered interview and assessment pipeline. You can add custom stages, start/complete/skip/reject stages, reorder future stages, and preserve append-only lifecycle history.
 
 ### AI-assisted job import
 
-Paste a job-posting URL and let the importer fill in:
+Paste a job-posting URL to extract role, company, location, source, summary, responsibilities, qualifications, and preferred skills. Groq is optional; without it the importer falls back to page metadata and JSON-LD.
 
-- Job title
-- Company
-- Location
-- Source
-- Job summary
-- Responsibilities
-- Required qualifications
-- Preferred skills
+The importer resolves and validates public addresses before connecting, pins outbound requests to vetted IP addresses, and repeats validation for redirects.
 
-When `GROQ_API_KEY` is configured, Groq produces structured notes. Without Groq, the app falls back to job-page metadata and JSON-LD where available.
-
-The server-side importer validates public DNS results and pins each outbound connection to the vetted IP address, including every redirect, to prevent DNS-rebinding/TOCTOU access to private network targets.
-
-### Authentication and admin
+### Authentication and administration
 
 - Email/password sign-in
-- Password recovery
 - Magic-link sign-in
+- Password recovery
 - Invitation-only onboarding
-- Secure admin dashboard at `/admin`
-- Invite users, update user details, send recovery links, and delete users/data
-- Supabase Row-Level Security keeps user data isolated
+- Single-use invite codes
+- Optional one-click access-request email from the login page
+- Server-side admin portal at `/admin`
+- User invitations, recovery links, magic links, profile updates, and deletion
+- Supabase Row-Level Security for user data isolation
 
-### Resumes
+### Private resumes
 
-- Upload PDF resumes up to 5 MB
-- Resume files are stored under each user's folder in the private `resumes` bucket
-- The database stores bucket-relative object paths rather than public URLs
-- Resume downloads use short-lived signed URLs generated for the authenticated owner
-- Failed application saves roll back newly uploaded resume files
-- Replacing a resume cleans up the previous object after the new database reference is saved
+- PDF upload up to 5 MB
+- Private Supabase Storage bucket
+- Per-user storage folders
+- Bucket-relative object paths stored in the database
+- Short-lived signed URLs for resume access
+- Cleanup for failed uploads and resume replacement
 
 ## Technology stack
 
@@ -89,7 +54,7 @@ The server-side importer validates public DNS results and pins each outbound con
 |---|---|
 | Framework | Next.js 16 App Router |
 | Language | TypeScript |
-| UI | React 19, Tailwind CSS 4, Radix UI, shadcn/ui |
+| UI | React 19, Tailwind CSS 4, Radix UI |
 | Database | Supabase PostgreSQL |
 | Authentication | Supabase Auth |
 | File storage | Supabase Storage |
@@ -108,59 +73,41 @@ npm install
 
 ### 2. Create a Supabase project
 
-Create a project in Supabase, then open **Project Settings → API** and copy:
+Create a Supabase project and collect:
 
-- Project URL
+- project URL
 - anon/public key
 - service-role key
 
-Keep the service-role key server-side only.
+The service-role key must remain server-side.
 
-### 3. Run the database setup and security migration
+### 3. Run the canonical database setup
 
-All database tables, indexes, RLS policies, lifecycle triggers, lifecycle history, and base resume storage policies are consolidated into:
+For a fresh installation, run the complete contents of:
 
 ```text
 supabase/setup.sql
 ```
 
-Security hardening for private resumes and append-only lifecycle history is in:
-
-```text
-supabase/migrations/20260831_security_hardening.sql
-```
-
-For a **fresh installation**:
-
-1. Open **Supabase → SQL Editor**.
-2. Run the full contents of `supabase/setup.sql`.
-3. Run the full contents of `supabase/migrations/20260831_security_hardening.sql`.
-
-The setup creates/configures:
+That single setup file creates or configures:
 
 - `job_applications`
 - `application_stages`
 - `application_stage_events`
-- indexes
+- `invite_codes`
+- indexes and constraints
 - Row-Level Security policies
 - lifecycle/event triggers
-- `resumes` storage bucket
-- resume storage policies
+- append-only lifecycle history
+- the private `resumes` bucket
+- per-user resume read/write policies
+- conversion of recognized legacy public resume URLs to object paths
 
-The hardening migration then:
+Fresh installations do **not** need to run the dated security migration. `supabase/migrations/20260831_security_hardening.sql` is retained only for older deployments that need to apply the original hardening changes without re-running the current `setup.sql`.
 
-- converts legacy public resume URLs to bucket-relative paths
-- makes the `resumes` bucket private
-- grants authenticated users read access only to their own resume folder
-- makes lifecycle history writeable by database triggers but read-only to normal application users
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for fresh-install, upgrade, verification, and troubleshooting steps.
 
-The scripts are designed to be safe to apply to an existing installation. Existing `Bookmarked` rows are preserved; only the default for newly created applications becomes `Applied`.
-
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full setup and upgrade guide.
-
-### 4. Configure authentication URLs
-
-In **Supabase → Authentication → URL Configuration**:
+### 4. Configure Supabase authentication URLs
 
 For local development:
 
@@ -168,7 +115,7 @@ For local development:
 Site URL: http://localhost:3000
 ```
 
-Add:
+Add redirect URLs such as:
 
 ```text
 http://localhost:3000/**
@@ -176,45 +123,54 @@ http://localhost:3000/auth/callback
 http://localhost:3000/reset-password**
 ```
 
-For production, replace the domain with your deployed URL.
+Use your deployed HTTPS domain instead of `localhost` in production.
 
-### 5. Check email templates
+### 5. Configure environment variables
 
-The password-reset template should use Supabase's generated confirmation URL:
+Copy `.env.example` to `.env.local` and replace every placeholder:
 
-```html
-<a href="{{ .ConfirmationURL }}">Reset password</a>
+```bash
+cp .env.example .env.local
 ```
 
-Invitation and magic-link templates should also use the generated confirmation URL.
-
-### 6. Create `.env.local`
+Required values:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
-
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=replace-with-a-long-random-password
-ADMIN_SESSION_SECRET=replace-with-at-least-32-random-characters
+ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
+```
 
-# Optional
-GROQ_API_KEY=your-groq-api-key
+Optional access-request contact:
+
+```env
+NEXT_PUBLIC_ACCESS_REQUEST_EMAIL=
+```
+
+Set `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` only in your deployment environment if you want the login page to show **Request access by email**. If it is blank or unset, that link is hidden.
+
+Optional values:
+
+```env
+GROQ_API_KEY=
 GROQ_MODEL=llama-3.3-70b-versatile
+MAINTENANCE_MODE=false
 ```
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, or `GROQ_API_KEY` with a `NEXT_PUBLIC_` prefix.
 
-Generate an admin session secret with:
+Generate a strong admin session secret with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-### 7. Start the app
+### 6. Start the application
 
 ```bash
 npm run dev
@@ -222,196 +178,108 @@ npm run dev
 
 Open:
 
-- App: `http://localhost:3000`
-- User login: `http://localhost:3000/login`
-- Admin: `http://localhost:3000/admin`
+- `http://localhost:3000`
+- `http://localhost:3000/admin`
 
-## Existing installation upgrade
+Use the admin portal to invite the first user.
 
-For an existing installation, back up production data and then run, in order:
+## Invitation and access-request flow
+
+Existing users can sign in by password or magic link. A person with a valid single-use invite code can create an account from the login page.
+
+When `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is configured, someone without an invite can click **Request access by email**. The browser opens their configured email application with a pre-filled message. If they already typed an email address into the login form, that address is included automatically in the draft.
+
+The template is:
 
 ```text
-supabase/setup.sql
-supabase/migrations/20260831_security_hardening.sql
+Subject: Access request - Job Application Tracker
+
+Hello,
+
+I'd like to request access to Job Application Tracker.
+
+Name:
+Email: [your email]
+Reason for access:
+
+Thanks.
 ```
 
-The setup script uses `if not exists`, policy recreation, and safe `alter table ... add column if not exists` operations where appropriate. It will:
+The mail client still requires the requester to press **Send**; the application itself does not send email on their behalf or include mail-provider credentials.
 
-- keep existing application rows
-- keep existing `Bookmarked` statuses unchanged
-- change only the default status for new rows to `Applied`
-- create the lifecycle tables if missing
-- add rejection-stage fields
-- add lifecycle triggers and history
-- create a starting history event for pre-existing applications that do not already have lifecycle events
+## Application lifecycle
 
-The security migration preserves applications while converting known legacy public resume URLs to private object paths. Test resume access after applying it.
-
-## Application lifecycle behaviour
-
-### New applications
-
-A newly added application starts as:
+Each application can have an ordered stage pipeline, for example:
 
 ```text
 Applied
+Recruiter Screening
+Coding Assessment
+Technical Interview - Round 1
+Technical Interview - Round 2
+Final Interview
 ```
 
-### Starting an interview stage
+Starting an interview stage moves the high-level application status to `Interviewing`. Rejecting a stage records the rejection timestamp and stage name. Lifecycle event rows are generated by trigger functions and are read-only to normal authenticated users.
 
-Starting a stage automatically moves the high-level status to:
+## Resume security
+
+Resume files are stored in the private `resumes` bucket under paths such as:
 
 ```text
-Interviewing
+<user-id>/<uuid>.pdf
 ```
 
-### Completing a round
+The database keeps that bucket-relative object path in the historical `resume_url` column. The client requests a short-lived signed URL only when the authenticated owner opens the resume.
 
-Completing a round does **not** automatically start the next one. This keeps the history accurate when a recruiter rejects the application after a completed round but before the next round actually begins.
+The upload flow also attempts to clean up newly uploaded files when the application save fails, and removes the previous resume only after a successful replacement is stored in the database.
 
-### Rejection
+## Job import security
 
-Rejecting at a stage records:
+`/api/jobs/import` is authenticated and treats the supplied job URL as untrusted input. The server:
 
-- application status = `Rejected`
-- rejected stage name
-- rejected timestamp
-- lifecycle event snapshot
+- permits HTTP/HTTPS URLs only
+- rejects private/reserved address ranges
+- resolves the destination before connecting
+- pins the request to the vetted IP address
+- preserves the original Host header and TLS SNI
+- repeats validation for each redirect
+- limits redirects, time, response type, and response size
 
-This lets the app show outcomes such as:
+## Security
 
-```text
-Rejected at: Technical Interview - Round 2
-```
+See [SECURITY.md](SECURITY.md) for the security model and vulnerability-reporting guidance.
 
-Lifecycle event rows are append-only for normal users. They are generated by database trigger functions and exposed to the owning user as read-only history.
+Before exposing a deployment to the internet:
 
-## First-time user setup
+- use unique production credentials
+- keep the service-role key server-only
+- keep the resume bucket private
+- verify RLS policies
+- configure only trusted auth redirect URLs
+- add rate limiting or edge protection appropriate to your deployment
+- run dependency and secret scanning
 
-1. Open `/admin`.
-2. Sign in using `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
-3. Invite the user by name/email.
-4. The user follows the invitation link and sets a password.
-5. The user can then sign in with password or magic link.
+## Documentation
 
-See [ADMIN_SETUP.md](ADMIN_SETUP.md) for admin-specific configuration.
-
-## Deploying to Vercel
-
-1. Import the repository into Vercel.
-2. Add all required environment variables.
-3. Set `NEXT_PUBLIC_SITE_URL` to the production domain.
-4. Add that domain to Supabase authentication redirect URLs.
-5. Run `supabase/setup.sql` against the production Supabase project.
-6. Run `supabase/migrations/20260831_security_hardening.sql`.
-7. Deploy/redeploy.
-8. Test authentication, application creation, stage tracking, private resume upload/download, replacement, and deletion flows.
-
-## Project structure
-
-```text
-app/
-├── admin/                    Admin dashboard
-├── api/
-│   ├── admin/                Server-side admin endpoints
-│   └── jobs/import/          IP-pinned job-page/Groq importer
-├── auth/callback/            Supabase auth callback
-├── jobs/                     Application dashboard
-├── login/                    User authentication
-├── reset-password/           Password setup/recovery
-└── page.tsx                  Landing/account overview
-
-components/
-├── AddJobDialog.tsx                 Add/edit application form
-├── ApplicationLifecycleDialog.tsx   Interview-stage and history manager
-├── AccountSettingsDialog.tsx        Account/data controls
-├── DeleteConfirmDialog.tsx          Delete confirmation
-├── Toast.tsx                        User feedback
-└── ui/                              Reusable UI primitives
-
-lib/
-├── admin-auth.ts
-├── admin-request.ts
-├── admin-supabase.ts
-├── resume-storage.ts
-├── supabase.ts
-└── types.ts
-
-supabase/
-├── setup.sql                         Base database/storage setup
-└── migrations/
-    └── 20260831_security_hardening.sql
-
-docs/
-└── INSTALLATION.md           Detailed fresh-install and upgrade guide
-```
-
-## Security overview
-
-The project includes:
-
-- Supabase Row-Level Security for applications and stages
-- append-only lifecycle history for normal users
-- user-scoped queries
-- server-only service-role usage
-- signed admin sessions
-- invitation-only user creation
-- DNS validation plus IP-pinned outbound connections for job imports
-- private user-scoped resume storage with short-lived signed URLs
-- PDF type and size validation for resumes
-- CSV spreadsheet-formula neutralization
-- Content Security Policy and other security headers
-
-Deployment responsibilities include:
-
-- use a long unique admin password
-- keep `.env.local` out of Git
-- never expose the service-role key
-- apply the security migration after the base setup
-- review RLS/storage policies before public use
-- add rate limiting for larger public deployments
-
-## Troubleshooting
-
-### Stage tracking says the schema is missing
-
-Run `supabase/setup.sql` and then `supabase/migrations/20260831_security_hardening.sql` in the Supabase SQL Editor. After both succeed, refresh the application.
-
-### Resume upload or download fails
-
-Confirm both SQL files completed successfully, the `resumes` bucket is private, the user is authenticated, and the file is a PDF under 5 MB. The authenticated user must have SELECT/INSERT/UPDATE/DELETE access only to the storage folder matching their user ID.
-
-### Database request is denied
-
-Confirm Row-Level Security policies were created by the SQL scripts and that the row belongs to the authenticated user's `user_id`.
-
-### AI import returns limited information
-
-Confirm `GROQ_API_KEY` is set. Some job boards block automated requests or render content only with client-side JavaScript.
-
-### Password-reset link does not open the reset form
-
-Check Supabase redirect URLs, `NEXT_PUBLIC_SITE_URL`, and email templates using `{{ .ConfirmationURL }}`. Generate a new recovery email after changing settings.
+- [Installation and database setup](docs/INSTALLATION.md)
+- [Admin portal setup](ADMIN_SETUP.md)
+- [Security policy](SECURITY.md)
+- [Public release checklist](docs/PUBLIC_RELEASE.md)
 
 ## Useful commands
 
 ```bash
 npm run dev
+npm run lint
 npm run build
 npm run start
-npm run lint
 ```
 
 ## Contributing
 
-1. Fork the repository.
-2. Create a branch from `main`.
-3. Make and test the change.
-4. Run `npm run lint` and `npm run build`.
-5. Open a focused pull request.
-
-Do not commit credentials, `.env.local`, private resumes, or database exports.
+Contributions can be submitted through focused pull requests. Before opening a PR, run the lint and build commands and avoid committing credentials, `.env.local`, resumes, or database exports.
 
 ## License
 
-No open-source license file is currently included. Until one is added, standard copyright rules apply.
+No `LICENSE` file is currently included. The source may be publicly visible, but do not describe the repository as open source until a license has been intentionally selected and added.

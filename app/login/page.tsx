@@ -10,9 +10,29 @@ import { CheckCircle2, KeyRound, Mail, UserPlus } from 'lucide-react'
 type Method = 'password' | 'magic-link'
 type View = 'signin' | 'invite-code' | 'invite-details'
 
+const ACCESS_REQUEST_EMAIL = process.env.NEXT_PUBLIC_ACCESS_REQUEST_EMAIL?.trim()
+
 function currentOrigin(): string {
   if (typeof window !== 'undefined') return window.location.origin
   return process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+}
+
+function accessRequestHref(recipient: string, requesterEmail: string): string {
+  const normalizedEmail = requesterEmail.trim().toLowerCase()
+  const subject = 'Access request - Job Application Tracker'
+  const body = [
+    'Hello,',
+    '',
+    "I'd like to request access to Job Application Tracker.",
+    '',
+    'Name:',
+    `Email: ${normalizedEmail || '[your email]'}`,
+    'Reason for access:',
+    '',
+    'Thanks.',
+  ].join('\n')
+
+  return `mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
 export default function LoginPage() {
@@ -266,6 +286,20 @@ export default function LoginPage() {
               Create your account
             </button>
           </div>
+
+          {ACCESS_REQUEST_EMAIL && (
+            <div className="border-t border-slate-800 pt-4 text-center space-y-2">
+              <p className="text-xs text-slate-500">Need an invitation?</p>
+              <a
+                href={accessRequestHref(ACCESS_REQUEST_EMAIL, email)}
+                className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-emerald-400 hover:text-emerald-300"
+              >
+                <Mail className="w-4 h-4" />
+                Request access by email
+              </a>
+              <p className="text-[11px] text-slate-600">Opens your email app with a pre-filled request.</p>
+            </div>
+          )}
         </form>
       </div>
     </div>
