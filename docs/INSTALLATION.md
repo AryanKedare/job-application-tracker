@@ -1,14 +1,15 @@
 # Installation and Database Setup
 
-This project uses Supabase for PostgreSQL, authentication, and resume storage.
+This project uses Supabase for PostgreSQL, authentication, and private resume storage.
 
-The repository intentionally keeps **all SQL required by the application in one canonical file**:
+Database installation has two ordered steps:
 
 ```text
 supabase/setup.sql
+supabase/migrations/20260831_security_hardening.sql
 ```
 
-Do not copy older SQL snippets from issues, commits, or previous README versions. For a new deployment, use the complete `supabase/setup.sql` file.
+Do not copy older SQL snippets from issues, commits, or previous README versions.
 
 ## Fresh installation
 
@@ -28,13 +29,19 @@ The service-role key is server-only and must never be exposed to browser code.
 
 Open **Supabase → SQL Editor** and create a new query.
 
-Copy and run the entire contents of:
+First, copy and run the entire contents of:
 
 ```text
 supabase/setup.sql
 ```
 
-The script configures everything the database/storage side of the application needs:
+Then copy and run:
+
+```text
+supabase/migrations/20260831_security_hardening.sql
+```
+
+The base setup configures:
 
 - `public.job_applications`
 - `public.application_stages`
@@ -42,7 +49,6 @@ The script configures everything the database/storage side of the application ne
 - indexes
 - application Row-Level Security policies
 - stage Row-Level Security policies
-- lifecycle history policies
 - lifecycle trigger functions
 - application/status event logging
 - interview-stage status synchronisation
@@ -50,7 +56,14 @@ The script configures everything the database/storage side of the application ne
 - 5 MB PDF restriction for the resume bucket
 - per-user resume upload/update/delete policies
 
-After the query succeeds, Supabase/PostgREST may take a few seconds to expose newly-created tables.
+The security migration then:
+
+- migrates known legacy public resume URLs to bucket-relative paths
+- makes the `resumes` bucket private
+- adds per-user SELECT access required for signed resume URLs
+- converts lifecycle history to trigger-written, read-only data for normal users
+
+After the queries succeed, Supabase/PostgREST may take a few seconds to expose newly-created tables and policies.
 
 ### 3. Verify the schema
 
@@ -62,11 +75,7 @@ application_stages
 application_stage_events
 ```
 
-In **Storage**, confirm this bucket exists:
-
-```text
-resumes
-```
+In **Storage**, confirm the `resumes` bucket exists and is **private**.
 
 ### 4. Configure authentication URLs
 
@@ -116,9 +125,6 @@ ADMIN_SESSION_SECRET=replace-with-at-least-32-random-characters
 # Optional AI import
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=llama-3.3-70b-versatile
-
-# Optional logo provider
-LOGO_DEV_PUBLISHABLE_KEY=your-logo-dev-publishable-key
 ```
 
 Never prefix these with `NEXT_PUBLIC_`:
@@ -130,11 +136,14 @@ Never prefix these with `NEXT_PUBLIC_`:
 
 ## Upgrading an existing installation
 
-`supabase/setup.sql` is also the canonical upgrade path for installations created before lifecycle/interview-stage tracking was added.
-
 Before changing a production database, take a backup according to your normal operational process.
 
-Then run the **current complete** `supabase/setup.sql` in the SQL Editor.
+Run these files in order:
+
+```text
+supabase/setup.sql
+supabase/migrations/20260831_security_hardening.sql
+```
 
 The setup script is designed to be re-runnable. For older databases it will:
 
@@ -146,12 +155,12 @@ The setup script is designed to be re-runnable. For older databases it will:
 - add `rejected_stage_name` if missing
 - create `application_stages` if missing
 - create `application_stage_events` if missing
-- recreate the required RLS policies
+- recreate the base RLS policies
 - create/update lifecycle triggers
 - ensure the `resumes` bucket and storage policies are configured
 - create one `application_imported` lifecycle event for older applications that have no lifecycle history yet
 
-It does **not** automatically turn existing bookmarked jobs into applied jobs.
+The security migration then applies the current private-storage and append-only-history model. It does **not** delete application rows or turn existing bookmarked jobs into applied jobs.
 
 ## Lifecycle data model
 
@@ -214,22 +223,23 @@ stage_renamed
 status_changed
 ```
 
-Normal authenticated users can read and append appropriate history through application operations, but no update/delete RLS policies are exposed for event rows. This prevents ordinary user operations from rewriting lifecycle history.
+Normal authenticated users can read lifecycle history but cannot insert, update, or delete event rows directly. Security-definer trigger functions append history as application and stage operations occur.
 
 ## Resume storage
 
-The setup file creates/configures the `resumes` bucket with:
+After the security migration, the `resumes` bucket has:
 
-- public access, because the current application stores public resume URLs
+- private access
 - 5 MB file limit
 - `application/pdf` MIME restriction
-- user-specific object paths such as `resumes/<user-id>/...`
+- user-specific object paths such as `<user-id>/<uuid>.pdf`
+- authenticated SELECT/INSERT/UPDATE/DELETE policies restricted to the user's own top-level folder
 
-For higher-sensitivity deployments, migrate the application to a private bucket and signed URLs before making the bucket private.
+`job_applications.resume_url` stores the bucket-relative object path for new uploads. The migration converts the previous Supabase public URL format when it recognizes it. The UI creates a short-lived signed URL only when the authenticated owner opens a resume.
 
-## Re-running `setup.sql`
+## Re-running the SQL
 
-The SQL file uses idempotent patterns wherever practical, including:
+`supabase/setup.sql` uses idempotent patterns wherever practical, including:
 
 - `create ... if not exists`
 - `add column if not exists`
@@ -238,28 +248,30 @@ The SQL file uses idempotent patterns wherever practical, including:
 - `on conflict` for the resume bucket
 - guarded import of lifecycle history
 
-This makes one file useful for both initial setup and bringing an older installation up to the current schema.
+After re-running `setup.sql`, re-run `supabase/migrations/20260831_security_hardening.sql` so the security overrides remain the final state.
 
 ## Troubleshooting
 
 ### Stage tracking reports missing tables
 
-Run the current `supabase/setup.sql`, confirm it completes successfully, wait a few seconds for the schema cache, and refresh the app.
+Run both SQL files in order, confirm they complete successfully, wait a few seconds for the schema cache, and refresh the app.
 
 ### Permission denied / RLS error
 
-Re-run `supabase/setup.sql` and verify the authenticated user owns the application row (`user_id`).
+Re-run both SQL files and verify the authenticated user owns the application row (`user_id`).
 
-### Resume uploads fail
+### Resume uploads or downloads fail
 
 Check that:
 
-- the `resumes` bucket exists
+- the `resumes` bucket exists and is private
+- the security migration has been applied
 - the user is authenticated
 - the object path begins with the user's ID
+- the user has the per-folder storage SELECT policy
 - the file is a PDF
 - the file is no larger than 5 MB
 
 ### Existing jobs disappeared after upgrade
 
-The provided setup script does not delete job application rows. Stop changes and inspect the database/audit logs before running unrelated cleanup queries.
+The provided SQL does not delete job application rows. Stop changes and inspect the database/audit logs before running unrelated cleanup queries.
