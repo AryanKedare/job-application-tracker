@@ -38,12 +38,17 @@ export default function Home() {
 
   useEffect(() => {
     const loadData = async () => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) {
-        setFeedback({ text: 'Could not check your account session.', error: true })
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session?.user) {
+        if (sessionError) await supabase.auth.signOut()
         return
       }
-      if (!user) return
+
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) {
+        await supabase.auth.signOut()
+        return
+      }
 
       setLoggedIn(true)
       const realName = user.user_metadata?.full_name || user.user_metadata?.name || null

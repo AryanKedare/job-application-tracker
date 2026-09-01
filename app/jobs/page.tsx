@@ -90,6 +90,7 @@ export default function JobsPage() {
     const checkAuth = async () => {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
       if (sessionError || !session?.user) {
+        if (sessionError) await supabase.auth.signOut()
         router.replace('/login')
         return
       }
@@ -231,7 +232,7 @@ export default function JobsPage() {
   return (
     <>
       <main className="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100">
-        <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 xl:max-w-[1780px] xl:px-10">
           <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               <Button asChild variant="outline" size="icon" className="flex-shrink-0 rounded-full border-slate-700 bg-slate-900">
@@ -295,49 +296,86 @@ export default function JobsPage() {
               {!jobs.length && <Button onClick={() => setAddOpen(true)} className="mt-5 bg-emerald-500 text-slate-950 hover:bg-emerald-600"><Plus className="mr-2 h-4 w-4" />Add application</Button>}
             </section>
           ) : (
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredJobs.map((job) => {
-                const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status)
-                return (
-                  <article key={job.id} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <InitialsAvatar name={job.company || job.job_title} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-slate-400">{job.company || 'Company not set'}</p>
-                        <h2 className="break-words text-lg font-semibold leading-snug text-slate-100">{job.job_title}</h2>
+            <>
+              <section className="grid gap-4 md:grid-cols-2 xl:hidden">
+                {filteredJobs.map((job) => {
+                  const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status)
+                  return (
+                    <article key={job.id} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <InitialsAvatar name={job.company || job.job_title} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-slate-400">{job.company || 'Company not set'}</p>
+                          <h2 className="break-words text-lg font-semibold leading-snug text-slate-100">{job.job_title}</h2>
+                        </div>
+                        <div className="flex flex-shrink-0 gap-1">
+                          <button type="button" onClick={() => setEditDialog({ open: true, job })} aria-label={`Edit ${job.job_title}`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"><Pencil className="h-4 w-4" /></button>
+                          <button type="button" onClick={() => setDeleteDialog({ open: true, job })} aria-label={`Delete ${job.job_title}`} className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>
+                        </div>
                       </div>
-                      <div className="flex flex-shrink-0 gap-1">
-                        <button type="button" onClick={() => setEditDialog({ open: true, job })} aria-label={`Edit ${job.job_title}`} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-slate-100"><Pencil className="h-4 w-4" /></button>
-                        <button type="button" onClick={() => setDeleteDialog({ open: true, job })} aria-label={`Delete ${job.job_title}`} className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <div className="relative inline-block">
+                          <select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} aria-label={`Status for ${job.job_title}`} className={`appearance-none rounded-full py-1 pl-5 pr-3 text-xs font-semibold ${STATUS_STYLE[job.status].pill}`}>
+                            {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+                          </select>
+                          <span className={`absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full ${STATUS_STYLE[job.status].dot}`} />
+                        </div>
+                        <button type="button" onClick={() => setLifecycleDialog({ open: true, job })} className="min-w-0 flex-1 rounded-full border border-slate-700 bg-slate-950/50 px-3 py-1.5 text-left hover:border-slate-600">
+                          <span className="flex min-w-0 items-center gap-2"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="truncate text-xs font-medium text-blue-400">Set interview stages</span>}</span>
+                        </button>
                       </div>
-                    </div>
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <div className="relative inline-block">
-                        <select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} aria-label={`Status for ${job.job_title}`} className={`appearance-none rounded-full py-1 pl-5 pr-3 text-xs font-semibold ${STATUS_STYLE[job.status].pill}`}>
-                          {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
-                        </select>
-                        <span className={`absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full ${STATUS_STYLE[job.status].dot}`} />
+                      <dl className="mt-4 grid gap-2 text-sm text-slate-400">
+                        <div className="flex min-w-0 items-center gap-2"><MapPin className="h-4 w-4 flex-shrink-0 text-slate-600" /><dd className="truncate">{job.location || 'Location not set'}</dd></div>
+                        <div className="flex min-w-0 items-center gap-2"><CalendarDays className="h-4 w-4 flex-shrink-0 text-slate-600" /><dd>{formatDate(job.date_applied)}</dd></div>
+                      </dl>
+
+                      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-4">
+                        {job.job_link && <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-blue-300 hover:bg-slate-800">Job link <ExternalLink className="h-3.5 w-3.5" /></a>}
+                        {job.resume_url && <button type="button" onClick={() => void handleOpenResume(job.resume_url!)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800"><Download className="h-3.5 w-3.5" />Resume</button>}
+                        {job.notes?.trim() && <button type="button" onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:bg-slate-800"><StickyNote className="h-3.5 w-3.5" />Notes</button>}
                       </div>
-                      <button type="button" onClick={() => setLifecycleDialog({ open: true, job })} className="min-w-0 flex-1 rounded-full border border-slate-700 bg-slate-950/50 px-3 py-1.5 text-left hover:border-slate-600">
-                        <span className="flex min-w-0 items-center gap-2"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="truncate text-xs font-medium text-blue-400">Set interview stages</span>}</span>
-                      </button>
-                    </div>
+                    </article>
+                  )
+                })}
+              </section>
 
-                    <dl className="mt-4 grid gap-2 text-sm text-slate-400">
-                      <div className="flex min-w-0 items-center gap-2"><MapPin className="h-4 w-4 flex-shrink-0 text-slate-600" /><dd className="truncate">{job.location || 'Location not set'}</dd></div>
-                      <div className="flex min-w-0 items-center gap-2"><CalendarDays className="h-4 w-4 flex-shrink-0 text-slate-600" /><dd>{formatDate(job.date_applied)}</dd></div>
-                    </dl>
-
-                    <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-4">
-                      {job.job_link && <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-blue-300 hover:bg-slate-800">Job link <ExternalLink className="h-3.5 w-3.5" /></a>}
-                      {job.resume_url && <button type="button" onClick={() => void handleOpenResume(job.resume_url!)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800"><Download className="h-3.5 w-3.5" />Resume</button>}
-                      {job.notes?.trim() && <button type="button" onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-amber-300 hover:bg-slate-800"><StickyNote className="h-3.5 w-3.5" />Notes</button>}
-                    </div>
-                  </article>
-                )
-              })}
-            </section>
+              <div className="hidden overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 xl:block">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1280px] table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-[15%]" /><col className="w-[20%]" /><col className="w-[9%]" /><col className="w-[10%]" /><col className="w-[16%]" />
+                      <col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[5%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="border-b border-slate-800 text-left text-xs uppercase text-slate-500">
+                        <th className="px-4 py-3.5">Company</th><th className="px-4 py-3.5">Role</th><th className="px-4 py-3.5">Location</th><th className="px-4 py-3.5">Status</th><th className="px-4 py-3.5">Stage</th><th className="px-4 py-3.5">Apply</th><th className="px-4 py-3.5">Resume</th><th className="px-4 py-3.5">Notes</th><th className="px-4 py-3.5">Date</th><th />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/70">
+                      {filteredJobs.map((job) => {
+                        const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status)
+                        return (
+                          <tr key={job.id} className="group hover:bg-slate-800/40">
+                            <td className="px-4 py-3.5"><div className="flex min-w-0 items-center gap-3"><InitialsAvatar name={job.company || job.job_title} /><span className="min-w-0 truncate font-medium">{job.company || '—'}</span></div></td>
+                            <td className="px-4 py-3.5"><div className="truncate font-semibold">{job.job_title}</div></td>
+                            <td className="px-4 py-3.5"><div className="truncate text-slate-400">{job.location || '—'}</div></td>
+                            <td className="px-4 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} aria-label={`Status for ${job.job_title}`} className={`appearance-none rounded-full py-1 pl-5 pr-3 text-xs font-semibold ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td>
+                            <td className="px-4 py-3.5"><button type="button" onClick={() => setLifecycleDialog({ open: true, job })} className="flex min-w-0 max-w-full items-center gap-2 text-left"><ListTree className="h-4 w-4 flex-shrink-0 text-slate-500" />{summary ? <span className={`min-w-0 rounded-full border px-2.5 py-1 ${summary.tone}`}><span className="block truncate text-xs font-semibold">{summary.label}</span><span className="block text-[10px] opacity-70">{summary.detail}</span></span> : <span className="text-xs text-blue-400">Add stages</span>}</button></td>
+                            <td className="px-4 py-3.5">{job.job_link ? <a href={job.job_link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400">Link<ExternalLink className="h-3 w-3" /></a> : '—'}</td>
+                            <td className="px-4 py-3.5">{job.resume_url ? <button type="button" onClick={() => void handleOpenResume(job.resume_url!)} className="inline-flex items-center gap-1"><Download className="h-3 w-3" />CV</button> : '—'}</td>
+                            <td className="px-4 py-3.5">{job.notes?.trim() ? <button type="button" onClick={() => setNotesDialog({ open: true, notes: job.notes ?? '', jobTitle: job.job_title, company: job.company ?? '' })} className="inline-flex items-center gap-1 text-amber-400"><StickyNote className="h-3 w-3" />View</button> : '—'}</td>
+                            <td className="whitespace-nowrap px-4 py-3.5 text-slate-500">{job.date_applied ? new Date(job.date_applied).toLocaleDateString('en-IE', { day: '2-digit', month: 'short' }) : '—'}</td>
+                            <td className="px-2 py-3.5"><div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" onClick={() => setEditDialog({ open: true, job })} aria-label={`Edit ${job.job_title}`} className="p-1.5"><Pencil className="h-3.5 w-3.5" /></button><button type="button" onClick={() => setDeleteDialog({ open: true, job })} aria-label={`Delete ${job.job_title}`} className="p-1.5 text-red-400"><Trash2 className="h-3.5 w-3.5" /></button></div></td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </main>
