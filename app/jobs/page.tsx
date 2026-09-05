@@ -39,6 +39,7 @@ interface ToastState { message: string; type: 'success' | 'error' }
 type StageMap = Record<string, ApplicationStage[]>
 
 function stageSummary(stages: ApplicationStage[], status: JobApplication['status']) {
+  if (status === 'Bookmarked') return null
   const rejected = stages.filter((stage) => stage.state === 'rejected').sort((a, b) => new Date(b.completed_at ?? 0).getTime() - new Date(a.completed_at ?? 0).getTime())[0]
   if (status === 'Rejected' && rejected) return { label: rejected.name, detail: 'Rejected', tone: 'text-red-300 border-red-500/30 bg-red-500/10' }
   const current = stages.find((stage) => stage.state === 'current')
@@ -129,13 +130,95 @@ export default function JobsPage() {
   useEffect(() => { if (authChecked) void fetchData() }, [authChecked, fetchData])
 
   const handleStatusChange = async (id: string, newStatus: JobApplication['status']) => {
-    const applicationStages = stagesByApplication[id] ?? []
+    let applicationStages = stagesByApplication[id] ?? []
+    const now = new Date().toISOString()
+
+    if (newStatus === 'Bookmarked') {
+      if (applicationStages.length) {
+        const { error: resetError } = await supabase
+          .from('application_stages')
+          .update({ state: 'pending', started_at: null, completed_at: null })
+          .eq('application_id', id)
+          .eq('user_id', userId)
+
+        if (resetError) {
+          showToast('Failed to reset application stages.', 'error')
+          return
+        }
+      }
+
+      const { error } = await supabase
+        .from('job_applications')
+        .update({ status: 'Bookmarked', rejected_at: null, rejected_stage_name: null })
+        .eq('id', id)
+        .eq('user_id', userId)
+
+      if (error) {
+        showToast('Failed to update status.', 'error')
+        void fetchData(false)
+        return
+      }
+
+      await fetchData(false)
+      showToast('Status changed to Bookmarked.', 'success')
+      return
+    }
+
+    let appliedStage = applicationStages.find((stage) =>
+      stage.position === 0 && (stage.stage_type === 'application' || stage.name.toLowerCase() === 'applied'),
+    )
+
+    if (!appliedStage) {
+      const { data, error } = await supabase
+        .from('application_stages')
+        .insert({
+          application_id: id,
+          user_id: userId,
+          name: 'Applied',
+          stage_type: 'application',
+          position: 0,
+          state: 'completed',
+          started_at: now,
+          completed_at: now,
+        })
+        .select()
+        .single()
+
+      if (error || !data) {
+        showToast('Failed to create the Applied stage.', 'error')
+        return
+      }
+
+      appliedStage = data as ApplicationStage
+      applicationStages = [appliedStage, ...applicationStages]
+    } else if (appliedStage.state !== 'completed') {
+      const { data, error } = await supabase
+        .from('application_stages')
+        .update({
+          state: 'completed',
+          started_at: appliedStage.started_at ?? now,
+          completed_at: now,
+        })
+        .eq('id', appliedStage.id)
+        .eq('user_id', userId)
+        .select()
+        .single()
+
+      if (error || !data) {
+        showToast('Failed to update the Applied stage.', 'error')
+        return
+      }
+
+      const updatedAppliedStage = data as ApplicationStage
+      applicationStages = applicationStages.map((stage) => stage.id === updatedAppliedStage.id ? updatedAppliedStage : stage)
+    }
+
     const currentStage = applicationStages.find((stage) => stage.state === 'current')
     const lastCompletedStage = applicationStages.filter((stage) => stage.state === 'completed').sort((a, b) => b.position - a.position)[0]
     const rejectionStage = currentStage ?? lastCompletedStage
 
     if (newStatus === 'Rejected' && rejectionStage) {
-      const { error } = await supabase.from('application_stages').update({ state: 'rejected', completed_at: new Date().toISOString() }).eq('id', rejectionStage.id).eq('user_id', userId)
+      const { error } = await supabase.from('application_stages').update({ state: 'rejected', completed_at: now }).eq('id', rejectionStage.id).eq('user_id', userId)
       if (error) { showToast('Failed to record the rejection stage.', 'error'); return }
       await fetchData(false)
       showToast(`Rejected at ${rejectionStage.name}.`, 'success')
@@ -143,11 +226,16 @@ export default function JobsPage() {
     }
 
     if (newStatus === 'Offer' && currentStage) {
-      const { error } = await supabase.from('application_stages').update({ state: 'completed', completed_at: new Date().toISOString() }).eq('id', currentStage.id).eq('user_id', userId)
+      const { error } = await supabase.from('application_stages').update({ state: 'completed', completed_at: now }).eq('id', currentStage.id).eq('user_id', userId)
       if (error) { showToast('Failed to complete the current stage.', 'error'); return }
     }
 
-    const { error } = await supabase.from('job_applications').update({ status: newStatus }).eq('id', id).eq('user_id', userId)
+    const { error } = await supabase
+      .from('job_applications')
+      .update({ status: newStatus, rejected_at: null, rejected_stage_name: null })
+      .eq('id', id)
+      .eq('user_id', userId)
+
     if (error) {
       showToast('Failed to update status.', 'error')
       return
