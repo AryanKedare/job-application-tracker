@@ -318,36 +318,24 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  const hostnames = [domain, `www.${domain}`]
-  const iconPaths = [
-    '/favicon.ico',
-    '/apple-touch-icon.png',
-    '/favicon.png',
-    '/favicon-32x32.png',
-    '/favicon-96x96.png',
-    '/android-chrome-192x192.png',
-  ]
+  for (const path of ['/favicon.ico', '/apple-touch-icon.png', '/favicon.png']) {
+    try {
+      const body = await fetchPinnedImage(`https://${domain}${path}`)
+      if (!body) continue
+      const contentType = detectImageType(body)
+      if (!contentType) continue
 
-  for (const hostname of hostnames) {
-    for (const path of iconPaths) {
-      try {
-        const body = await fetchPinnedImage(`https://${hostname}${path}`)
-        if (!body) continue
-        const contentType = detectImageType(body)
-        if (!contentType) continue
-
-        return new NextResponse(new Uint8Array(body), {
-          status: 200,
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'private, max-age=604800, stale-while-revalidate=86400',
-            'Content-Security-Policy': "default-src 'none'; sandbox",
-            'X-Content-Type-Options': 'nosniff',
-          },
-        })
-      } catch {
-        // Try the next conventional icon location.
-      }
+      return new NextResponse(new Uint8Array(body), {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'private, max-age=604800, stale-while-revalidate=86400',
+          'Content-Security-Policy': "default-src 'none'; sandbox",
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    } catch {
+      // Try the next conventional icon path.
     }
   }
 
