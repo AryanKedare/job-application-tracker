@@ -1,6 +1,5 @@
 'use client'
 
-import Image from 'next/image'
 import { useEffect, useState } from 'react'
 
 import { supabase } from '@/lib/supabase'
@@ -46,6 +45,7 @@ async function fetchCompanyIcon(company: string): Promise<string | null> {
       const response = await fetch(`/api/company-icon?company=${encodeURIComponent(company)}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
         credentials: 'same-origin',
+        cache: 'no-store',
       })
       if (!response.ok) return null
 
@@ -72,11 +72,12 @@ export default function CompanyAvatar({ company, fallbackName }: Props) {
   const companyName = company?.trim() ?? ''
   const fallback = companyName || fallbackName
   const { initials, color } = avatarDetails(fallback)
-  const [iconSrc, setIconSrc] = useState<string | null>(() => companyName ? iconCache.get(companyCacheKey(companyName)) ?? null : null)
+  const cacheKey = companyName ? companyCacheKey(companyName) : ''
+  const [iconSrc, setIconSrc] = useState<string | null>(() => cacheKey ? iconCache.get(cacheKey) ?? null : null)
 
   useEffect(() => {
     let cancelled = false
-    const cached = companyName ? iconCache.get(companyCacheKey(companyName)) ?? null : null
+    const cached = cacheKey ? iconCache.get(cacheKey) ?? null : null
     setIconSrc(cached)
 
     if (!companyName || cached) return () => { cancelled = true }
@@ -86,7 +87,16 @@ export default function CompanyAvatar({ company, fallbackName }: Props) {
     })
 
     return () => { cancelled = true }
-  }, [companyName])
+  }, [cacheKey, companyName])
+
+  const handleImageError = () => {
+    if (cacheKey) {
+      const cached = iconCache.get(cacheKey)
+      if (cached) URL.revokeObjectURL(cached)
+      iconCache.delete(cacheKey)
+    }
+    setIconSrc(null)
+  }
 
   return (
     <div className={`relative flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10 ${color}`}>
@@ -94,15 +104,17 @@ export default function CompanyAvatar({ company, fallbackName }: Props) {
 
       {iconSrc && (
         <span className="absolute inset-0 flex items-center justify-center bg-white">
-          <Image
+          {/* The source is an authenticated same-origin fetch converted to a local blob URL. */}
+          <img
             src={iconSrc}
             alt={`${companyName} logo`}
             width={32}
             height={32}
-            sizes="32px"
             className="h-8 w-8 object-contain"
-            unoptimized
-            onError={() => setIconSrc(null)}
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            onError={handleImageError}
           />
         </span>
       )}
