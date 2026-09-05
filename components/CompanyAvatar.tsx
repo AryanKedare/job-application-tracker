@@ -105,6 +105,7 @@ export default function CompanyAvatar({ company, fallbackName }: Props) {
       {iconSrc && (
         <span className="absolute inset-0 flex items-center justify-center bg-white">
           {/* The source is an authenticated same-origin fetch converted to a local blob URL. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={iconSrc}
             alt={`${companyName} logo`}
