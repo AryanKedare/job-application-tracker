@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
@@ -264,7 +265,24 @@ async function resolveCompanyDomain(company: string): Promise<string | null> {
   return domain
 }
 
-async function authenticatedUser() {
+async function authenticatedUser(request: NextRequest) {
+  const authorization = request.headers.get('authorization')?.trim() ?? ''
+  const bearerToken = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : ''
+
+  if (bearerToken) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (url && anonKey) {
+      const supabase = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+      const { data: { user } } = await supabase.auth.getUser(bearerToken)
+      if (user) return user
+    }
+  }
+
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -286,7 +304,7 @@ async function authenticatedUser() {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await authenticatedUser()
+  const user = await authenticatedUser(request)
   if (!user) return new NextResponse(null, { status: 401 })
 
   const company = request.nextUrl.searchParams.get('company')?.trim().slice(0, 200) ?? ''
@@ -296,33 +314,45 @@ export async function GET(request: NextRequest) {
   if (!domain) {
     return new NextResponse(null, {
       status: 404,
-      headers: { 'Cache-Control': 'private, max-age=3600' },
+      headers: { 'Cache-Control': 'private, no-store' },
     })
   }
 
-  for (const path of ['/favicon.ico', '/apple-touch-icon.png', '/favicon.png']) {
-    try {
-      const body = await fetchPinnedImage(`https://${domain}${path}`)
-      if (!body) continue
-      const contentType = detectImageType(body)
-      if (!contentType) continue
+  const hostnames = [domain, `www.${domain}`]
+  const iconPaths = [
+    '/favicon.ico',
+    '/apple-touch-icon.png',
+    '/favicon.png',
+    '/favicon-32x32.png',
+    '/favicon-96x96.png',
+    '/android-chrome-192x192.png',
+  ]
 
-      return new NextResponse(new Uint8Array(body), {
-        status: 200,
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'private, max-age=604800, stale-while-revalidate=86400',
-          'Content-Security-Policy': "default-src 'none'; sandbox",
-          'X-Content-Type-Options': 'nosniff',
-        },
-      })
-    } catch {
-      // Try the next conventional icon path.
+  for (const hostname of hostnames) {
+    for (const path of iconPaths) {
+      try {
+        const body = await fetchPinnedImage(`https://${hostname}${path}`)
+        if (!body) continue
+        const contentType = detectImageType(body)
+        if (!contentType) continue
+
+        return new NextResponse(new Uint8Array(body), {
+          status: 200,
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'private, max-age=604800, stale-while-revalidate=86400',
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
+      } catch {
+        // Try the next conventional icon location.
+      }
     }
   }
 
   return new NextResponse(null, {
     status: 404,
-    headers: { 'Cache-Control': 'private, max-age=3600' },
+    headers: { 'Cache-Control': 'private, no-store' },
   })
 }
