@@ -18,6 +18,7 @@ import AddJobDialog from '@/components/AddJobDialog'
 import ApplicationLifecycleDialog from '@/components/ApplicationLifecycleDialog'
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog'
 import AccountSettingsDialog from '@/components/AccountSettingsDialog'
+import CompanyAvatar from '@/components/CompanyAvatar'
 import Toast from '@/components/Toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -32,18 +33,6 @@ const STATUS_STYLE: Record<JobApplication['status'], { pill: string; dot: string
   Offer: { pill: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30', dot: 'bg-emerald-400' },
   Rejected: { pill: 'bg-red-500/15 text-red-300 border border-red-500/30', dot: 'bg-red-400' },
   Ghosted: { pill: 'bg-slate-600/30 text-slate-400 border border-slate-600/30', dot: 'bg-slate-500' },
-}
-
-function AvatarShell({ children, colorClass = 'bg-white' }: { children: React.ReactNode; colorClass?: string }) {
-  return <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.35)] ring-1 ring-white/10 ${colorClass}`}>{children}</div>
-}
-
-function InitialsAvatar({ name }: { name: string }) {
-  const safeName = name.trim() || '?'
-  const initials = safeName.split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('')
-  const palettes = ['bg-blue-600', 'bg-violet-600', 'bg-emerald-600', 'bg-amber-500', 'bg-rose-600', 'bg-cyan-600', 'bg-indigo-600', 'bg-teal-600']
-  const color = palettes[safeName.charCodeAt(0) % palettes.length]
-  return <AvatarShell colorClass={color}><span className="text-xs font-bold tracking-wide text-white">{initials}</span></AvatarShell>
 }
 
 interface ToastState { message: string; type: 'success' | 'error' }
@@ -303,7 +292,7 @@ export default function JobsPage() {
                   return (
                     <article key={job.id} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
                       <div className="flex min-w-0 items-start gap-3">
-                        <InitialsAvatar name={job.company || job.job_title} />
+                        <CompanyAvatar company={job.company} fallbackName={job.job_title} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm text-slate-400">{job.company || 'Company not set'}</p>
                           <h2 className="break-words text-lg font-semibold leading-snug text-slate-100">{job.job_title}</h2>
@@ -358,7 +347,7 @@ export default function JobsPage() {
                         const summary = stageSummary(stagesByApplication[job.id] ?? [], job.status)
                         return (
                           <tr key={job.id} className="group hover:bg-slate-800/40">
-                            <td className="px-4 py-3.5"><div className="flex min-w-0 items-center gap-3"><InitialsAvatar name={job.company || job.job_title} /><span className="min-w-0 truncate font-medium">{job.company || '—'}</span></div></td>
+                            <td className="px-4 py-3.5"><div className="flex min-w-0 items-center gap-3"><CompanyAvatar company={job.company} fallbackName={job.job_title} /><span className="min-w-0 truncate font-medium">{job.company || '—'}</span></div></td>
                             <td className="px-4 py-3.5"><div className="truncate font-semibold">{job.job_title}</div></td>
                             <td className="px-4 py-3.5"><div className="truncate text-slate-400">{job.location || '—'}</div></td>
                             <td className="px-4 py-3.5"><div className="relative inline-block"><select value={job.status} onChange={(event) => void handleStatusChange(job.id, event.target.value as JobApplication['status'])} aria-label={`Status for ${job.job_title}`} className={`appearance-none rounded-full py-1 pl-5 pr-3 text-xs font-semibold ${STATUS_STYLE[job.status].pill}`}>{STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}</select><span className={`absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full ${STATUS_STYLE[job.status].dot}`} /></div></td>
