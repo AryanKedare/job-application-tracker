@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
@@ -264,7 +265,24 @@ async function resolveCompanyDomain(company: string): Promise<string | null> {
   return domain
 }
 
-async function authenticatedUser() {
+async function authenticatedUser(request: NextRequest) {
+  const authorization = request.headers.get('authorization')?.trim() ?? ''
+  const bearerToken = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : ''
+
+  if (bearerToken) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (url && anonKey) {
+      const supabase = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+      const { data: { user } } = await supabase.auth.getUser(bearerToken)
+      if (user) return user
+    }
+  }
+
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -286,7 +304,7 @@ async function authenticatedUser() {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await authenticatedUser()
+  const user = await authenticatedUser(request)
   if (!user) return new NextResponse(null, { status: 401 })
 
   const company = request.nextUrl.searchParams.get('company')?.trim().slice(0, 200) ?? ''
@@ -296,7 +314,7 @@ export async function GET(request: NextRequest) {
   if (!domain) {
     return new NextResponse(null, {
       status: 404,
-      headers: { 'Cache-Control': 'private, max-age=3600' },
+      headers: { 'Cache-Control': 'private, no-store' },
     })
   }
 
@@ -323,6 +341,6 @@ export async function GET(request: NextRequest) {
 
   return new NextResponse(null, {
     status: 404,
-    headers: { 'Cache-Control': 'private, max-age=3600' },
+    headers: { 'Cache-Control': 'private, no-store' },
   })
 }
