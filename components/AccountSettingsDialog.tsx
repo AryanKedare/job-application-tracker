@@ -213,12 +213,9 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
 
           <section className="space-y-3">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><BellRing className="h-3.5 w-3.5" />Email preferences</h3>
-            <div className="space-y-3 rounded-xl border border-slate-700/50 bg-slate-800/60 px-4 py-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-200">Product updates and changelogs</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">Receive emails about new Job Tracker features and product changes. Password recovery, magic links, and important account/security emails are not affected.</p>
-                </div>
+            <div className="space-y-2 rounded-xl border border-slate-700/50 bg-slate-800/60 px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm font-medium text-slate-200">Product updates and changelogs</p>
                 <button
                   type="button"
                   role="switch"
@@ -226,7 +223,7 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
                   aria-label="Product update emails"
                   disabled={preferenceLoading || preferenceSaving}
                   onClick={() => void handleEmailPreferenceChange(!emailUpdatesEnabled)}
-                  className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${emailUpdatesEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${emailUpdatesEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
                 >
                   <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${emailUpdatesEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
