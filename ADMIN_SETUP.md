@@ -51,7 +51,58 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
 Use a unique administrator password that is not reused for Supabase, GitHub, Vercel, email, or any other service.
 
-## 3. Understand the admin trust boundary
+## 3. Configure Resend admin update emails
+
+Password-recovery and magic-link emails can continue to use your existing Supabase Auth + Resend SMTP configuration. The admin update-email composer is separate: it calls the Resend API server-side.
+
+Supabase Auth remains the source of truth for Job Tracker users. The application does **not** copy users into Resend Contacts or Segments and does not require a Resend Segment ID. Resend is used only as the mail-delivery transport for these admin updates.
+
+In Resend:
+
+1. Keep your sending domain verified.
+2. Create a sending API key for this deployment. A domain-scoped sending key is preferred when your Resend account supports that configuration; Contacts/Segments permissions are not required by this feature.
+3. Choose a sender address on the verified domain, for example `Job Tracker <updates@your-domain.example>`.
+
+Add the following server-only deployment variables:
+
+```env
+RESEND_API_KEY=
+RESEND_FROM=
+```
+
+Do not prefix either value with `NEXT_PUBLIC_`, and do not commit production values to Git.
+
+### Recipient modes
+
+The admin dashboard provides three recipient modes:
+
+- **All users** — the server reads all confirmed Supabase Auth users and sends directly to those current account addresses.
+- **Selected users** — the administrator selects confirmed Job Tracker users; the server resolves those user IDs against Supabase Auth before sending.
+- **Custom emails** — the administrator enters one-off addresses. These addresses are not added to Supabase Auth or to a Resend audience.
+
+All three modes use Resend Batch Email for delivery. Messages are sent individually rather than exposing recipients through To/CC/BCC lists. Direct sends are chunked into batches of at most 100 messages per Resend request.
+
+The current application-side limits are:
+
+- up to 10,000 confirmed users when **All users** is selected
+- up to 1,000 recipients for **Selected users** or **Custom emails**
+
+The composer also provides:
+
+- a subject field
+- a message field
+- an optional HTTPS call-to-action button
+- **Send test**, which sends the rendered template only to `ADMIN_EMAIL`
+- a confirmation step before every real send
+- the number of recipients accepted for delivery
+
+### Product-update preferences
+
+Because Resend is delivery-only in this design, these direct admin emails do not use Resend Contacts/Segments and do not have a Resend-managed product-update unsubscribe link.
+
+For a larger public deployment, add a Job Tracker-owned preference such as `email_updates_enabled` and filter all/selected registered recipients against that preference before sending product/changelog mail. Authentication, password-recovery, account-security, and other essential transactional messages should remain separate from that preference.
+
+## 4. Understand the admin trust boundary
 
 The `/admin` portal is more privileged than a normal application session because its server-side API routes can use the Supabase service-role client.
 
@@ -64,6 +115,8 @@ The portal can:
 - edit a user's name or email
 - send password-recovery emails
 - send magic links
+- send a test update email through Resend
+- send update emails to all confirmed users, selected users, or custom addresses
 - delete a user and application data
 - remove files from that user's resume Storage folder
 
@@ -71,7 +124,7 @@ Invite codes are stored only as SHA-256 hashes in `public.invite_codes`. Browser
 
 Deleting a job application cascades its interview stages and lifecycle event records through the database relationships configured in `supabase/setup.sql`.
 
-## 4. First administrator test
+## 5. First administrator test
 
 After deployment:
 
@@ -81,11 +134,14 @@ After deployment:
 4. Complete the invitation in a separate/private browser session.
 5. Verify the user can access only their own applications and resumes.
 6. Test recovery and magic-link flows before inviting real users.
-7. Verify deleting the test user removes the expected database/storage data.
+7. Configure the Resend variables, compose a harmless update, and use **Send test** first.
+8. Confirm the sender/domain/template render correctly.
+9. Test **Selected users** with only your own test account before using **All users**.
+10. Verify deleting the test user removes the expected database/storage data.
 
-Do not perform the first production test with irreplaceable data.
+Do not perform the first production test with irreplaceable data or a real audience.
 
-## 5. Public deployment protections
+## 6. Public deployment protections
 
 For an internet-accessible deployment:
 
@@ -94,13 +150,15 @@ For an internet-accessible deployment:
 - keep `/admin` out of search/navigation where it is not needed
 - add platform-level access controls, WAF rules, or identity-aware proxy protection for `/admin` where practical
 - add rate limiting for login/admin API endpoints if the deployment will receive significant untrusted traffic
-- keep deployment logs free of secrets and service-role tokens
+- keep deployment logs free of secrets, service-role tokens, and Resend API keys
 - restrict access to deployment environment settings
 - keep database backups and test restores before schema changes
+- always send a test email before sending a production update
+- add an application-owned opt-out preference before using product-update email at significant scale
 
 The application-level admin cookie should not be treated as a replacement for infrastructure protection on a high-value or large multi-user deployment.
 
-## 6. Maintenance mode
+## 7. Maintenance mode
 
 The app includes a maintenance mode for planned upgrades.
 
@@ -137,15 +195,16 @@ or by removing the variable and redeploying.
 
 `MAINTENANCE_MODE` is server-side and must not use the `NEXT_PUBLIC_` prefix.
 
-## 7. Credential rotation
+## 8. Credential rotation
 
 If an admin secret is exposed:
 
 1. Replace `ADMIN_PASSWORD`.
 2. Replace `ADMIN_SESSION_SECRET` so existing admin sessions become invalid.
 3. Rotate `SUPABASE_SERVICE_ROLE_KEY` in Supabase if that key may have been exposed.
-4. Update the deployment environment immediately.
-5. Redeploy.
-6. Review deployment/application logs for suspicious admin activity.
+4. Rotate `RESEND_API_KEY` if that key may have been exposed.
+5. Update the deployment environment immediately.
+6. Redeploy.
+7. Review deployment/application logs for suspicious admin activity.
 
 If a repository vulnerability may have exposed user data, follow [SECURITY.md](SECURITY.md) and your incident-response process rather than discussing sensitive details in a public issue.
