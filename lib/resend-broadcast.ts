@@ -116,3 +116,34 @@ export async function sendTestEmail(options: {
   if (!result.ok) throw resendError(result, 'Could not send the Resend test email.')
   return typeof result.data.id === 'string' ? result.data.id : null
 }
+
+export async function sendPdfEmail(options: {
+  from: string
+  to: string
+  subject: string
+  html: string
+  text: string
+  filename: string
+  pdf: Buffer
+  idempotencyKey: string
+}) {
+  const result = await resendRequest('/emails', {
+    method: 'POST',
+    body: JSON.stringify({
+      from: options.from,
+      to: [options.to],
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      attachments: [{
+        filename: options.filename,
+        content: options.pdf.toString('base64'),
+        content_type: 'application/pdf',
+      }],
+      tags: [{ name: 'category', value: 'application_analysis' }],
+    }),
+  }, options.idempotencyKey)
+
+  if (!result.ok) throw resendError(result, 'Could not email the analysis PDF.')
+  return typeof result.data.id === 'string' ? result.data.id : null
+}

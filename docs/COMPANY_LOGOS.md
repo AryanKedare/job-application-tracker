@@ -1,57 +1,143 @@
-# Automatic company icons
+# Automatic Company Logos
 
-The applications dashboard replaces the initials avatar with a company icon or logo when it can resolve one safely from the saved company name.
+The applications dashboard replaces the initials avatar with a company icon/logo when it can resolve one safely from the saved company name.
 
-## Requirements
+The feature is intentionally cost-aware: it prefers cached results and normal official-site discovery before using AI web search.
 
-This feature reuses the existing server-side Groq configuration:
+## Configuration
+
+Server-side Groq configuration:
 
 ```env
 GROQ_API_KEY=
-GROQ_MODEL=openai/gpt-oss-20b
+GROQ_LOGO_MODEL=llama-3.1-8b-instant
+GROQ_LOGO_WEB_MODEL=groq/compound-mini
 ```
 
-No additional logo-provider account or browser-facing API key is required. If `GROQ_API_KEY` is unset, the dashboard simply keeps the initials avatar.
+`GROQ_MODEL` / `openai/gpt-oss-20b` remain available as a fallback if the small logo-domain model is unavailable.
 
-## How it works
+No Brandfetch/Clearbit/logo-provider account or browser-facing API key is required.
 
-The lookup intentionally uses a fast path first and web-search AI only when necessary:
+If `GROQ_API_KEY` is unset, the dashboard falls back to initials whenever it cannot resolve a logo without AI.
 
-1. The browser requests the same-origin `/api/company-icon` endpoint for a saved company name.
-2. The endpoint requires an authenticated Supabase user.
-3. The normal Groq model first resolves the likely official company domain.
-4. The server tries the site's favicon, declared icon links, JSON-LD organization logo, and logo-like image elements on the official homepage.
-5. If no usable raster logo is found, the server calls Groq Compound with its built-in `web_search` and `visit_website` tools.
-6. Compound searches for the company's official website and, when available, an official press/media/brand raster logo URL.
-7. A direct AI-proposed logo is accepted only when it is HTTPS and hosted on the verified official company hostname or one of its subdomains. Otherwise the server uses the official page returned by the search and discovers logo assets from that page itself.
-8. Every outbound image/page fetch still uses DNS validation and IP pinning. Private/reserved addresses are blocked, redirects are constrained, response sizes are limited, and image bytes must match a supported raster/icon signature.
-9. If all logo paths fail, the existing initials avatar remains visible.
+## Persistent cache requirement
 
-The web-search fallback runs only after the normal icon lookup fails, so companies that already resolve successfully do not incur a Compound web-search request.
+The canonical database setup creates:
 
-Existing applications work automatically; no database migration or record backfill is required.
+```text
+public.company_logo_cache
+```
 
-## Caching
+Fresh installs get this table automatically by running:
 
-- successful browser icon blobs are reused during the current page session
-- normal company-domain resolutions are cached in server memory for 24 hours
-- successful web-search logo resolutions are cached in server memory for 7 days
-- unsuccessful web searches are cached for 30 minutes so a temporary failure does not trigger repeated searches on every render
+```text
+supabase/setup.sql
+```
 
-Server-memory caches are best-effort on serverless platforms and may be lost when an instance is recycled.
+Existing installations should re-run the current `supabase/setup.sql` once to add/configure the cache.
+
+No separate logo-cache migration is required for the current release.
+
+The cache is server-only. Browser roles have no direct access.
+
+It stores only public company-resolution metadata:
+
+- normalized company key
+- official domain
+- official website URL when found
+- official logo URL when found
+- resolver model
+- resolution/expiry timestamps
+
+It does not contain user IDs, application IDs, resumes, notes, emails, or authentication data.
+
+## Resolution flow
+
+For a saved company name:
+
+1. The browser requests the same-origin `/api/company-icon` route as an authenticated user.
+2. The server checks persistent/in-memory cached resolution data.
+3. If needed, `GROQ_LOGO_MODEL` resolves the likely official public company domain.
+4. The server tries safe official-site sources such as favicon paths, declared icon links, JSON-LD organization logos, and logo-like homepage images.
+5. If normal discovery still fails, `GROQ_LOGO_WEB_MODEL` uses Groq Compound Mini web search/website visiting to locate the official site or official brand/media asset.
+6. AI-proposed URLs are treated as untrusted input.
+7. A direct logo is accepted only if it is HTTPS and belongs to the verified official hostname/subdomain boundary.
+8. Outbound requests still go through DNS validation, IP pinning, private/reserved-network blocking, redirect restrictions, response-size limits, and raster image signature checks.
+9. If no safe logo is found, the initials avatar remains visible.
+
+The browser never needs to contact the company website directly.
+
+## Cost controls
+
+The logo path intentionally uses the cheapest reasonable option first:
+
+```text
+persistent cache
+    ↓ miss
+small logo/domain model
+    ↓
+official-site favicon/logo discovery
+    ↓ only if needed
+Compound Mini web search
+```
+
+Current cache policy:
+
+- positive AI company-resolution results: reused for about 30 days
+- negative AI resolution results: reused for about 12 hours
+- browser blob results: reused for the current page/module session
+- in-memory request de-duplication prevents duplicate simultaneous requests for the same company within one server/browser instance
+
+The persistent Supabase cache is the important layer for Vercel/serverless deployments because in-memory caches can disappear on cold start.
 
 ## Privacy
 
-Only the saved company name and the previously inferred public company domain are included in the logo-resolution prompts.
+Logo AI receives only public company-resolution context such as:
 
-Resume files, application notes, job status, user email, and other application data are not included.
+- saved company name
+- previously inferred public domain when applicable
 
-Groq Compound's web-search and website-visit tools access public web content on Groq's infrastructure. The company website does not receive the user's browser request directly; logo assets are fetched server-side through the restricted same-origin icon endpoint.
+It does not receive:
+
+- user email
+- resume files
+- resume paths
+- application notes
+- job status
+- authentication tokens
+- unrelated application data
+
+Groq's web-search/website-visit tools access public web content on Groq infrastructure. The application then validates any returned network target before using it.
 
 ## Accuracy and safety
 
-Logo lookup is cosmetic. The system prefers official company websites, press/media pages, and official brand assets and rejects third-party logo repositories as AI-proposed direct sources.
+Logo lookup is cosmetic. The application prefers official company websites/brand assets and deliberately rejects third-party logo repositories as trusted direct AI sources.
 
-The AI is not trusted as a network security boundary. Every URL it returns is treated as untrusted input and passes through the same URL, DNS, private-address, redirect, size, and image-signature validation used by the rest of the icon fetcher.
+Some companies may still show initials because:
 
-Some companies publish only SVG logos or place brand assets behind scripts/CDNs that cannot be validated safely. Those companies may still fall back to initials rather than weakening the outbound-request protections.
+- only SVG assets are available
+- the logo is loaded entirely through client-side JavaScript
+- the logo is hosted on a third-party CDN that cannot be safely tied to the official domain
+- the official site blocks automated access
+- the company name is ambiguous
+
+The application should prefer a safe initials fallback over weakening outbound-network protections.
+
+## Troubleshooting
+
+### Logos work, but AI credits keep increasing
+
+Confirm:
+
+- `public.company_logo_cache` exists
+- `SUPABASE_SERVICE_ROLE_KEY` is configured server-side
+- the current `supabase/setup.sql` has been applied
+- `GROQ_LOGO_MODEL` is set to the intended low-cost model
+
+### Most logos fall back to initials
+
+Check server logs for `/api/company-icon` and confirm the Groq key/model are available. Some companies legitimately cannot be resolved under the current safe raster/domain rules.
+
+### A logo is wrong
+
+The cache can retain a prior resolution until expiry. Correct the company name in the application first. If the official company identity genuinely changed, the server-side cache row can be cleared by an operator with appropriate Supabase access so it will be resolved again.

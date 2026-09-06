@@ -1,42 +1,24 @@
 # Public Release Checklist
 
-Use this checklist before announcing the repository or a hosted instance publicly.
+Use this checklist before announcing the repository or exposing a hosted instance to other users.
 
 ## 1. Licensing
 
 The repository currently does not include an open-source license.
 
-Before describing the project as **open source**, choose and add a `LICENSE` file that reflects how you want others to use, modify, and redistribute the code.
+Before describing the project as **open source**, intentionally choose and add a `LICENSE` file that defines permitted reuse, modification, and redistribution.
 
-Publishing a repository without a license makes the source visible, but does not automatically grant open-source reuse rights.
+A public/source-visible repository without a license does not automatically grant open-source rights.
 
-## 2. Repository settings
+## 2. Use the canonical setup path
 
-Recommended GitHub settings for a public release:
+Fresh deployments should use only:
 
-- enable private vulnerability reporting if available
-- enable Dependabot/security alerts where appropriate
-- protect `main` from accidental force-pushes
-- require pull requests for changes if multiple maintainers contribute
-- add CI for `npm run lint` and `npm run build`
-- avoid storing production exports, resumes, credentials, or `.env.local` files in issues or pull requests
+- [ONE_TIME_SETUP.md](ONE_TIME_SETUP.md)
+- `../supabase/setup.sql`
+- `../.env.example`
 
-Security reports should follow [../SECURITY.md](../SECURITY.md).
-
-## 3. Environment and secrets
-
-Start from the committed `.env.example` and replace all placeholders.
-
-Before release:
-
-- use a unique `ADMIN_PASSWORD`
-- generate a random `ADMIN_SESSION_SECRET`
-- verify `SUPABASE_SERVICE_ROLE_KEY` exists only in server-side environment settings
-- verify `GROQ_API_KEY`, if used, is server-side only
-- remove unused Preview/Development secrets from hosting environments
-- rotate any secret that has ever been pasted into a public issue, commit, screenshot, or log
-
-## 4. Database and Storage
+Do not build a fresh deployment from SQL snippets in old commits or historical migrations.
 
 Run the current complete:
 
@@ -44,46 +26,176 @@ Run the current complete:
 supabase/setup.sql
 ```
 
-Then verify:
+Then verify these tables exist:
 
-- `job_applications`, `application_stages`, `application_stage_events`, and `invite_codes` exist
-- RLS is enabled on application/stage/history tables
-- normal users can access only their own application data
+```text
+job_applications
+application_stages
+application_stage_events
+invite_codes
+company_logo_cache
+```
+
+Also verify:
+
+- RLS is enabled on application, stage, event, invite-code, and company-logo cache tables as configured by the setup
+- normal users can access only their own application/stage data
 - lifecycle events are read-only to normal authenticated users
+- invite codes are server/service-role only
+- company-logo cache is server/service-role only
 - the `resumes` bucket is private
-- resume Storage policies restrict paths to the authenticated user's top-level folder
-- invite-code storage is unavailable to `anon` and normal authenticated clients
+- resume Storage paths are owner-scoped by authenticated user ID
+- the bucket accepts only PDFs up to 5 MB
 
-Fresh installs should not require the dated legacy hardening migration.
+Fresh installs do not require a separate migration file.
+
+## 3. Repository settings
+
+Recommended GitHub settings:
+
+- enable private vulnerability reporting if available
+- enable Dependabot/security alerts where appropriate
+- protect `main` from accidental force-pushes
+- require pull requests for changes if multiple maintainers contribute
+- add CI for `npm run lint` and `npm run build`
+- never place production resumes, credentials, `.env.local`, database exports, or user data in issues/PRs
+
+Security reports should follow [../SECURITY.md](../SECURITY.md).
+
+## 4. Environment and secrets
+
+Start from `.env.example` and replace every placeholder used by your deployment.
+
+Core server-only secrets include:
+
+```text
+SUPABASE_SERVICE_ROLE_KEY
+ADMIN_PASSWORD
+ADMIN_SESSION_SECRET
+```
+
+Email/automation secrets may include:
+
+```text
+RESEND_API_KEY
+EMAIL_UNSUBSCRIBE_SECRET
+CRON_SECRET
+```
+
+AI secrets include:
+
+```text
+GROQ_API_KEY
+```
+
+Before release:
+
+- use unique production credentials
+- ensure server-only values do not use a `NEXT_PUBLIC_` prefix
+- remove unused Preview/Development secrets from hosting environments
+- rotate any secret ever pasted into a public issue, commit, screenshot, or log
+- restrict access to Supabase, Resend, Groq, GitHub, and hosting administration
 
 ## 5. Authentication
 
 For production:
 
 - set `NEXT_PUBLIC_SITE_URL` to the deployed HTTPS origin
-- configure Supabase Site URL and allowed redirect URLs for that origin
+- configure the same origin in Supabase Site URL/allowed redirects
 - remove unnecessary development redirect URLs
-- test invitation email flow
+- test invitation flow
 - test password recovery
 - test magic-link sign-in
-- ensure old test accounts do not have access they should not retain
+- verify old test accounts no longer have unwanted access
 
-## 6. Admin portal
+If using Resend SMTP for Supabase Auth, test it separately from the Job Tracker Resend API integration.
+
+## 6. Admin portal and update email
 
 Before exposing `/admin`:
 
-- verify admin credentials are not defaults or reused passwords
-- verify the admin session cookie is HTTP-only/secure in production behavior
+- use strong unique admin credentials
+- confirm the admin cookie has production-safe HTTP-only/secure behavior
 - protect `/admin` with infrastructure controls where practical
-- test user deletion using a disposable account
-- verify resume files are removed as expected during data deletion
-- understand that the service-role-backed admin API is a privileged trust boundary
+- test user deletion with a disposable account
+- verify resume cleanup
+- understand that service-role-backed admin routes are privileged
+
+If using admin update emails:
+
+- verify the Resend sending domain
+- configure `RESEND_API_KEY` and `RESEND_FROM` server-side
+- configure a unique `EMAIL_UNSUBSCRIBE_SECRET`
+- use **Send test** before a real send
+- test All users, Selected users, and Custom emails with disposable recipients
+- verify registered users who disabled product updates are excluded from product-update sends
+- verify the signed unsubscribe confirmation flow
 
 See [../ADMIN_SETUP.md](../ADMIN_SETUP.md).
 
-## 7. Application validation
+## 7. AI job import
 
-Run locally or in CI:
+If `GROQ_API_KEY` is configured:
+
+- verify `GROQ_IMPORT_MODEL` behavior with a normal job page
+- test at least one dynamic/SPA job platform you expect users to import from
+- test an Oracle Recruiting URL if Oracle support matters to the deployment
+- verify extracted summaries/requirements are factual before relying on them
+- confirm SSRF/private-network protections still reject local/reserved targets
+
+Without Groq, the importer should still use supported structured metadata/fallback extraction where available.
+
+## 8. Company logos and AI cost controls
+
+If automatic company logos are enabled:
+
+- verify `company_logo_cache` exists
+- verify the cache is inaccessible to browser roles
+- test a few common companies
+- confirm repeated requests reuse cached resolution metadata
+- verify `GROQ_LOGO_MODEL` uses the intended low-cost model
+- verify `GROQ_LOGO_WEB_MODEL` is only reached when normal official-site discovery fails
+- confirm unsafe/private network targets remain blocked
+
+See [COMPANY_LOGOS.md](COMPANY_LOGOS.md).
+
+## 9. AI analysis PDF and monthly automation
+
+If analysis reports are enabled:
+
+- configure `GROQ_ANALYSIS_MODEL`
+- configure Resend API delivery
+- request a manual PDF from a disposable account
+- confirm the PDF attachment arrives and contains the expected application metrics
+- confirm resume files, private notes, user email, and auth data are not included in the AI prompt path
+- confirm the 15-minute manual report cooldown works
+
+For monthly reports:
+
+- configure `CRON_SECRET`
+- confirm the cron route rejects invalid authorization
+- confirm **Monthly analysis email** defaults off
+- enable it for a disposable user and verify the preference persists
+- verify duplicate user/month delivery is blocked
+- confirm the cron schedule is visible in the deployed Vercel project
+
+See [AI_ANALYSIS.md](AI_ANALYSIS.md).
+
+## 10. Product email preferences
+
+Registered users can independently control product/changelog email delivery.
+
+Before release, verify:
+
+- Account settings can turn product updates off/on
+- all/selected product sends respect the opt-out
+- the email unsubscribe link opens a confirmation page
+- confirming the unsubscribe updates the same Supabase Auth preference
+- password recovery, magic links, account/security mail, and requested analysis reports are not incorrectly blocked by the product-update preference
+
+## 11. Application validation
+
+Run:
 
 ```bash
 npm install
@@ -96,51 +208,69 @@ Then test at minimum:
 - sign in/sign out
 - invitation redemption
 - create/edit/delete application
-- lifecycle stage creation and transitions
+- Applied ↔ Bookmarked status/lifecycle behavior
+- lifecycle stage creation/transitions
 - rejection at a stage
-- resume upload
-- signed resume download
-- resume replacement
+- resume upload/download/replacement
 - application deletion with resume cleanup
 - delete-all data flow
 - CSV export
-- job import with a normal public URL
-- blocked job import to private/local network targets
+- job import
+- company logos
+- Account settings toggles
+- manual analysis PDF
 - maintenance mode
 
-## 8. Production controls
+## 12. Production controls
 
-For a public internet deployment:
+For an internet-facing deployment:
 
-- serve the site over HTTPS
-- enable hosting/platform logs without logging secrets
-- add rate limiting/WAF controls if untrusted traffic volume warrants it
+- serve over HTTPS
+- keep platform/application logs free of secrets and personal data
+- add rate limiting/WAF controls if traffic warrants it
 - monitor authentication/admin failures
-- keep database backups
-- document how to restore from backup
-- restrict Supabase and deployment-platform administrator access
+- keep database backups and document restore procedures
+- restrict Supabase/hosting administrator access
 - keep dependencies updated
 
-## 9. Privacy and data handling
+## 13. Vercel deployment behavior
 
-Resumes and job-search notes may contain sensitive personal information.
+The repository intentionally disables automatic Git deployments in `vercel.json`:
 
-Before inviting other users:
+```json
+{
+  "git": {
+    "deploymentEnabled": false
+  }
+}
+```
+
+A merge/push will therefore not automatically publish the code. After validating a release, trigger a manual Production deployment in Vercel.
+
+Do not assume a merged PR is live until the manual production deployment completes.
+
+## 14. Privacy and data handling
+
+Resumes and job-search notes can contain sensitive personal information.
+
+Before inviting users:
 
 - decide who operates the service and who can access infrastructure-level data
-- document your retention/deletion expectations if the instance is shared
-- verify account deletion behaves as expected
-- avoid using production resumes when testing security or bug reports
+- document retention/deletion expectations if the instance is shared
+- verify account deletion behavior
+- avoid production resumes/user data in security tests or bug reports
+- understand which public job/company metadata is sent to Groq for enabled AI features
 
-## 10. Release notes
+## 15. Release notes
 
-A public release announcement should clearly state:
+A public release announcement should state:
 
-- whether the repository is open source or merely source-visible
-- expected deployment audience (personal/small-team)
-- required Supabase setup
-- optional Groq dependency
+- whether the repository is open source or only source-visible
+- expected deployment audience
+- that Supabase setup is required
+- that Groq/Resend features are optional/configurable
+- that automatic Vercel Git deployments are disabled by repository configuration
 - known operational limitations
-- where to report security vulnerabilities privately
+- where to report vulnerabilities privately
 
-Do not advertise security guarantees beyond what has actually been tested and deployed.
+Do not advertise guarantees beyond what has actually been tested and deployed.

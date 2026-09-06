@@ -1,0 +1,11 @@
+{
+  "git": {
+    "deploymentEnabled": false
+  },
+  "crons": [
+    {
+      "path": "/api/cron/monthly-analysis",
+      "schedule": "0 18 28-31 * *"
+    }
+  ]
+}

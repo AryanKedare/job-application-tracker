@@ -8,7 +8,8 @@ import { resumeStoragePath, spreadsheetSafe } from '@/lib/resume-storage'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Settings, Download, Trash2, AlertTriangle, CheckCircle2, User, Mail, Shield, BellRing } from 'lucide-react'
+import MonthlyAnalysisToggle from '@/components/MonthlyAnalysisToggle'
+import { Settings, Download, Trash2, AlertTriangle, CheckCircle2, User, Mail, Shield, BellRing, Sparkles } from 'lucide-react'
 
 interface Props {
   open: boolean
@@ -85,6 +86,8 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [exportSuccess, setExportSuccess] = useState<string | null>(null)
+  const [analysisSending, setAnalysisSending] = useState(false)
+  const [analysisMessage, setAnalysisMessage] = useState<{ text: string; error: boolean } | null>(null)
   const [emailUpdatesEnabled, setEmailUpdatesEnabled] = useState(true)
   const [preferenceLoading, setPreferenceLoading] = useState(false)
   const [preferenceSaving, setPreferenceSaving] = useState(false)
@@ -157,6 +160,37 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
     }
   }
 
+  const handleAnalysisReport = async () => {
+    setAnalysisSending(true)
+    setAnalysisMessage(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token
+      if (!accessToken) throw new Error('Your session is unavailable. Please sign in again.')
+
+      const response = await fetch('/api/analysis-report', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: 'same-origin',
+      })
+      const payload = await response.json().catch(() => ({})) as { error?: string; email?: string }
+      if (!response.ok) throw new Error(payload.error || 'Could not generate the analysis report.')
+
+      setAnalysisMessage({
+        text: `Analysis PDF sent to ${payload.email || userEmail}.`,
+        error: false,
+      })
+    } catch (error) {
+      console.error('Application analysis request failed:', error)
+      setAnalysisMessage({
+        text: error instanceof Error ? error.message : 'Could not generate the analysis report.',
+        error: true,
+      })
+    } finally {
+      setAnalysisSending(false)
+    }
+  }
+
   const handleDeleteAll = async () => {
     if (!canConfirm) return
     setDeletePhase('deleting')
@@ -226,6 +260,25 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
                 </button>
               </div>
               {preferenceMessage?.error && <p role="alert" className="mt-2 text-xs text-red-400">{preferenceMessage.text}</p>}
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><Sparkles className="h-3.5 w-3.5" />AI analysis</h3>
+            <div className="rounded-xl border border-slate-700/50 bg-slate-800/60 px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm font-medium text-slate-200">Application insights PDF</p>
+                <Button
+                  onClick={() => void handleAnalysisReport()}
+                  disabled={jobs.length === 0 || analysisSending}
+                  size="sm"
+                  className="flex-shrink-0 bg-violet-600 font-semibold text-white hover:bg-violet-700"
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />{analysisSending ? 'Generating…' : 'Email PDF'}
+                </Button>
+              </div>
+              {analysisMessage && <p role={analysisMessage.error ? 'alert' : 'status'} className={`mt-2 text-xs ${analysisMessage.error ? 'text-red-400' : 'text-emerald-400'}`}>{analysisMessage.text}</p>}
+              <MonthlyAnalysisToggle userId={userId} />
             </div>
           </section>
 
