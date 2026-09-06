@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Copy, KeyRound, LogOut, Mail, Megaphone, RefreshCw, Search, Send, Ticket, Trash2, UserPlus, UserRound, Users } from 'lucide-react'
+import RichTextEditor from '@/components/admin/RichTextEditor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,7 +33,8 @@ export default function AdminDashboard() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [generatedInvite, setGeneratedInvite] = useState<GeneratedInvite | null>(null)
   const [broadcastSubject, setBroadcastSubject] = useState('')
-  const [broadcastMessage, setBroadcastMessage] = useState('')
+  const [broadcastMessageHtml, setBroadcastMessageHtml] = useState('')
+  const [broadcastMessageText, setBroadcastMessageText] = useState('')
   const [broadcastCtaLabel, setBroadcastCtaLabel] = useState('')
   const [broadcastCtaUrl, setBroadcastCtaUrl] = useState('')
   const [recipientMode, setRecipientMode] = useState<RecipientMode>('all')
@@ -161,7 +163,8 @@ export default function AdminDashboard() {
 
   const clearBroadcastForm = () => {
     setBroadcastSubject('')
-    setBroadcastMessage('')
+    setBroadcastMessageHtml('')
+    setBroadcastMessageText('')
     setBroadcastCtaLabel('')
     setBroadcastCtaUrl('')
     setSelectedUserIds([])
@@ -171,12 +174,17 @@ export default function AdminDashboard() {
 
   const sendBroadcastUpdate = async (action: 'test' | 'send') => {
     const subject = broadcastSubject.trim()
-    const body = broadcastMessage.trim()
+    const body = broadcastMessageText.trim()
+    const bodyHtml = broadcastMessageHtml.trim()
     const ctaLabel = broadcastCtaLabel.trim()
     const ctaUrl = broadcastCtaUrl.trim()
 
     if (!subject || !body) {
       setMessage({ text: 'Enter an email subject and message.', error: true })
+      return
+    }
+    if (body.length > 10_000) {
+      setMessage({ text: 'Message must be 10,000 characters or fewer.', error: true })
       return
     }
     if (Boolean(ctaLabel) !== Boolean(ctaUrl)) {
@@ -217,6 +225,7 @@ export default function AdminDashboard() {
           customEmails: customRecipients,
           subject,
           message: body,
+          messageHtml: bodyHtml,
           ctaLabel,
           ctaUrl,
           requestId: crypto.randomUUID(),
@@ -419,7 +428,18 @@ export default function AdminDashboard() {
             )}
 
             <div className="space-y-2"><Label htmlFor="broadcast-subject">Subject</Label><Input id="broadcast-subject" maxLength={140} value={broadcastSubject} onChange={(event) => setBroadcastSubject(event.target.value)} className="border-slate-700 bg-slate-950" /></div>
-            <div className="space-y-2"><Label htmlFor="broadcast-message">Message</Label><Textarea id="broadcast-message" maxLength={10000} rows={8} value={broadcastMessage} onChange={(event) => setBroadcastMessage(event.target.value)} className="min-h-40 resize-y border-slate-700 bg-slate-950" /></div>
+            <div className="space-y-2">
+              <Label htmlFor="broadcast-message">Message</Label>
+              <RichTextEditor
+                value={broadcastMessageHtml}
+                onChange={(html, text) => {
+                  setBroadcastMessageHtml(html)
+                  setBroadcastMessageText(text)
+                }}
+                disabled={Boolean(busy)}
+                maxTextLength={10_000}
+              />
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2"><Label htmlFor="broadcast-cta-label">Button label (optional)</Label><Input id="broadcast-cta-label" maxLength={80} value={broadcastCtaLabel} onChange={(event) => setBroadcastCtaLabel(event.target.value)} className="border-slate-700 bg-slate-950" /></div>
               <div className="space-y-2"><Label htmlFor="broadcast-cta-url">Button HTTPS URL (optional)</Label><Input id="broadcast-cta-url" type="url" maxLength={2048} value={broadcastCtaUrl} onChange={(event) => setBroadcastCtaUrl(event.target.value)} className="border-slate-700 bg-slate-950" /></div>

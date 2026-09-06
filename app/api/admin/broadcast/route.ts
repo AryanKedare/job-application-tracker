@@ -9,6 +9,7 @@ export const runtime = 'nodejs'
 
 const MAX_SUBJECT_LENGTH = 140
 const MAX_MESSAGE_LENGTH = 10_000
+const MAX_MESSAGE_HTML_LENGTH = 50_000
 const MAX_CTA_LABEL_LENGTH = 80
 const MAX_ALL_RECIPIENTS = 10_000
 const MAX_DIRECT_RECIPIENTS = 1_000
@@ -29,6 +30,13 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;')
 }
 
+function escapeRichTextFragment(value: string) {
+  return value
+    .replace(/&(?!(?:amp|lt|gt|quot|nbsp|#39|#\d+|#x[0-9a-f]+);)/gi, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 function validHttpsUrl(value: string) {
   try {
     const url = new URL(value)
@@ -42,16 +50,158 @@ function validEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
-function messageHtml(message: string) {
+function plainMessageHtml(message: string) {
   return message
     .split(/\n\s*\n/)
     .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.7;color:#cbd5e1;">${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
     .join('')
 }
 
+const RICH_TAG_ALIASES: Record<string, string> = {
+  b: 'strong',
+  i: 'em',
+  strike: 's',
+}
+const ALLOWED_RICH_TAGS = new Set([
+  'p', 'div', 'br', 'strong', 'em', 'u', 's', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'blockquote',
+])
+
+function normalizedRichTag(tag: string) {
+  const lower = tag.toLowerCase()
+  return RICH_TAG_ALIASES[lower] ?? lower
+}
+
+function richOpeningTag(tag: string, href?: string) {
+  switch (tag) {
+    case 'p':
+      return '<p style="margin:0 0 16px;line-height:1.7;color:#cbd5e1;">'
+    case 'div':
+      return '<div style="margin:0 0 16px;line-height:1.7;color:#cbd5e1;">'
+    case 'strong':
+      return '<strong style="font-weight:700;color:#f8fafc;">'
+    case 'em':
+      return '<em>'
+    case 'u':
+      return '<u>'
+    case 's':
+      return '<s>'
+    case 'h2':
+      return '<h2 style="margin:22px 0 10px;font-size:21px;line-height:1.35;color:#f8fafc;">'
+    case 'h3':
+      return '<h3 style="margin:20px 0 9px;font-size:17px;line-height:1.4;color:#f8fafc;">'
+    case 'ul':
+      return '<ul style="margin:0 0 16px;padding-left:24px;line-height:1.7;color:#cbd5e1;">'
+    case 'ol':
+      return '<ol style="margin:0 0 16px;padding-left:24px;line-height:1.7;color:#cbd5e1;">'
+    case 'li':
+      return '<li style="margin:0 0 6px;">'
+    case 'blockquote':
+      return '<blockquote style="margin:0 0 16px;padding:10px 14px;border-left:3px solid #475569;color:#94a3b8;">'
+    case 'a':
+      return href
+        ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" style="color:#93c5fd;text-decoration:underline;">`
+        : ''
+    default:
+      return ''
+  }
+}
+
+function sanitizeRichMessageHtml(input: string) {
+  const cleaned = input
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style|iframe|object|embed|svg|math|form)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+
+  const output: string[] = []
+  const stack: string[] = []
+  const tagPattern = /<[^>]*>/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+
+  while ((match = tagPattern.exec(cleaned))) {
+    output.push(escapeRichTextFragment(cleaned.slice(cursor, match.index)))
+    cursor = tagPattern.lastIndex
+
+    const token = match[0]
+    const closing = token.match(/^<\s*\/\s*([a-z0-9]+)\s*>$/i)
+    if (closing) {
+      const tag = normalizedRichTag(closing[1])
+      const index = stack.lastIndexOf(tag)
+      if (index >= 0) {
+        while (stack.length > index) {
+          output.push(`</${stack.pop()}>`)
+        }
+      }
+      continue
+    }
+
+    const opening = token.match(/^<\s*([a-z0-9]+)\b([^>]*)>$/i)
+    if (!opening) continue
+
+    const tag = normalizedRichTag(opening[1])
+    if (!ALLOWED_RICH_TAGS.has(tag)) continue
+    if (tag === 'br') {
+      output.push('<br>')
+      continue
+    }
+
+    let href: string | undefined
+    if (tag === 'a') {
+      const attributes = opening[2]
+      const hrefMatch = attributes.match(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)
+      const candidate = (hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? '').trim()
+      if (!candidate || !validHttpsUrl(candidate)) continue
+      href = new URL(candidate).toString()
+    }
+
+    const rendered = richOpeningTag(tag, href)
+    if (!rendered) continue
+    output.push(rendered)
+    stack.push(tag)
+  }
+
+  output.push(escapeRichTextFragment(cleaned.slice(cursor)))
+  while (stack.length) output.push(`</${stack.pop()}>`)
+  return output.join('')
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#(\d+);/g, (_match, code: string) => {
+      const value = Number(code)
+      return Number.isInteger(value) && value >= 0 && value <= 0x10ffff ? String.fromCodePoint(value) : ''
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code: string) => {
+      const value = Number.parseInt(code, 16)
+      return Number.isInteger(value) && value >= 0 && value <= 0x10ffff ? String.fromCodePoint(value) : ''
+    })
+}
+
+function richMessageText(html: string) {
+  return decodeHtmlEntities(
+    html
+      .replace(/<li\b[^>]*>/gi, '• ')
+      .replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(?:p|div|h2|h3|li|blockquote)>/gi, '\n')
+      .replace(/<\/(?:ul|ol)>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  )
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function buildContent(options: {
   subject: string
-  message: string
+  messageHtml: string
+  messageText: string
   ctaLabel: string
   ctaUrl: string
   siteUrl: string
@@ -98,7 +248,7 @@ function buildContent(options: {
             <div style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#a78bfa;">Job Application Tracker</div>
             <h1 style="margin:12px 0 24px;font-size:26px;line-height:1.25;color:#f8fafc;">${escapeHtml(options.subject)}</h1>
             <p style="margin:0 0 18px;line-height:1.7;color:#cbd5e1;">${greeting}</p>
-            ${messageHtml(options.message)}
+            ${options.messageHtml}
             ${cta}
           </td></tr>
           <tr><td style="border-top:1px solid #1e293b;padding:20px 32px 28px;font-size:12px;line-height:1.6;color:#64748b;">
@@ -115,7 +265,7 @@ function buildContent(options: {
     '',
     greeting.replace(/<[^>]+>/g, ''),
     '',
-    options.message,
+    options.messageText,
     options.ctaLabel && options.ctaUrl ? `\n${options.ctaLabel}: ${options.ctaUrl}` : '',
     '',
     footer.text,
@@ -190,6 +340,7 @@ export async function POST(request: NextRequest) {
     customEmails?: unknown
     subject?: unknown
     message?: unknown
+    messageHtml?: unknown
     ctaLabel?: unknown
     ctaUrl?: unknown
     requestId?: unknown
@@ -198,13 +349,26 @@ export async function POST(request: NextRequest) {
   const action = body?.action === 'test' || body?.action === 'send' || body?.action === 'broadcast' ? body.action : null
   const recipientMode = body?.recipientMode === 'selected' || body?.recipientMode === 'custom' ? body.recipientMode : 'all'
   const subject = typeof body?.subject === 'string' ? body.subject.trim().slice(0, MAX_SUBJECT_LENGTH) : ''
-  const message = typeof body?.message === 'string' ? body.message.trim().slice(0, MAX_MESSAGE_LENGTH) : ''
+  const plainMessage = typeof body?.message === 'string' ? body.message.trim().slice(0, MAX_MESSAGE_LENGTH) : ''
+  const rawMessageHtml = typeof body?.messageHtml === 'string' ? body.messageHtml.trim() : ''
   const ctaLabel = typeof body?.ctaLabel === 'string' ? body.ctaLabel.trim().slice(0, MAX_CTA_LABEL_LENGTH) : ''
   const ctaUrl = typeof body?.ctaUrl === 'string' ? body.ctaUrl.trim().slice(0, 2048) : ''
   const requestId = typeof body?.requestId === 'string' ? body.requestId.trim().slice(0, 80) : ''
 
-  if (!action || !subject || !message || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) {
+  if (rawMessageHtml.length > MAX_MESSAGE_HTML_LENGTH) {
+    return NextResponse.json({ error: 'The formatted message is too large.' }, { status: 400 })
+  }
+
+  const formattedMessageHtml = rawMessageHtml
+    ? sanitizeRichMessageHtml(rawMessageHtml)
+    : plainMessageHtml(plainMessage)
+  const messageText = rawMessageHtml ? richMessageText(formattedMessageHtml) : plainMessage
+
+  if (!action || !subject || !messageText || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) {
     return NextResponse.json({ error: 'Subject, message, and a valid request are required.' }, { status: 400 })
+  }
+  if (messageText.length > MAX_MESSAGE_LENGTH) {
+    return NextResponse.json({ error: `Message must be ${MAX_MESSAGE_LENGTH.toLocaleString()} characters or fewer.` }, { status: 400 })
   }
   if (Boolean(ctaLabel) !== Boolean(ctaUrl)) {
     return NextResponse.json({ error: 'Provide both a button label and HTTPS URL, or leave both empty.' }, { status: 400 })
@@ -221,7 +385,15 @@ export async function POST(request: NextRequest) {
       const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase() ?? ''
       if (!adminEmail) return NextResponse.json({ error: 'ADMIN_EMAIL is not configured.' }, { status: 503 })
 
-      const content = buildContent({ subject, message, ctaLabel, ctaUrl, siteUrl, testMode: true })
+      const content = buildContent({
+        subject,
+        messageHtml: formattedMessageHtml,
+        messageText,
+        ctaLabel,
+        ctaUrl,
+        siteUrl,
+        testMode: true,
+      })
       const emailId = await sendTestEmail({
         from,
         to: adminEmail,
@@ -263,7 +435,8 @@ export async function POST(request: NextRequest) {
         : ''
       const content = buildContent({
         subject,
-        message,
+        messageHtml: formattedMessageHtml,
+        messageText,
         ctaLabel,
         ctaUrl,
         siteUrl,
