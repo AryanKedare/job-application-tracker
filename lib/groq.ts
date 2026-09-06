@@ -11,12 +11,25 @@ interface GroqResponse {
 
 export type GroqReasoningEffort = 'low' | 'medium' | 'high'
 
+export type GroqResponseFormat =
+  | { type: 'json_object' }
+  | {
+      type: 'json_schema'
+      json_schema: {
+        name: string
+        strict?: boolean
+        schema: Record<string, unknown>
+      }
+    }
+
 export interface GroqJsonOptions {
   timeoutMs?: number
   temperature?: number
   models?: string[]
   reasoningEffort?: GroqReasoningEffort
   maxCompletionTokens?: number
+  responseFormat?: GroqResponseFormat
+  includeReasoning?: boolean
 }
 
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions'
@@ -130,14 +143,16 @@ export async function groqJson<T>(
         body: JSON.stringify({
           model,
           temperature: options?.temperature ?? 0,
-          response_format: { type: 'json_object' },
+          response_format: options?.responseFormat ?? { type: 'json_object' },
           messages,
           ...(options?.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
+          ...(typeof options?.includeReasoning === 'boolean' ? { include_reasoning: options.includeReasoning } : {}),
           ...(options?.maxCompletionTokens ? { max_completion_tokens: options.maxCompletionTokens } : {}),
         }),
       })
 
       if (!response.ok) {
+        console.warn('Groq request failed', { model, status: response.status })
         if (RETRYABLE_STATUSES.has(response.status)) continue
         return null
       }
