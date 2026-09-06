@@ -68,15 +68,22 @@ Add the following server-only deployment variables:
 ```env
 RESEND_API_KEY=
 RESEND_FROM=
+EMAIL_UNSUBSCRIBE_SECRET=
 ```
 
-Do not prefix either value with `NEXT_PUBLIC_`, and do not commit production values to Git.
+`EMAIL_UNSUBSCRIBE_SECRET` signs the account-specific unsubscribe links included in product-update emails. Use at least 32 random characters. A convenient generator is:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Do not prefix any of these values with `NEXT_PUBLIC_`, and do not commit production values to Git.
 
 ### Recipient modes
 
 The admin dashboard provides three recipient modes:
 
-- **All users** — the server reads all confirmed Supabase Auth users and sends directly to those current account addresses.
+- **All users** — the server reads all confirmed Supabase Auth users and sends directly to their current account addresses.
 - **Selected users** — the administrator selects confirmed Job Tracker users; the server resolves those user IDs against Supabase Auth before sending.
 - **Custom emails** — the administrator enters one-off addresses. These addresses are not added to Supabase Auth or to a Resend audience.
 
@@ -98,9 +105,19 @@ The composer also provides:
 
 ### Product-update preferences
 
-Because Resend is delivery-only in this design, these direct admin emails do not use Resend Contacts/Segments and do not have a Resend-managed product-update unsubscribe link.
+Registered Job Tracker users control product/changelog email delivery through the Supabase Auth metadata key:
 
-For a larger public deployment, add a Job Tracker-owned preference such as `email_updates_enabled` and filter all/selected registered recipients against that preference before sending product/changelog mail. Authentication, password-recovery, account-security, and other essential transactional messages should remain separate from that preference.
+```text
+email_updates_enabled
+```
+
+A missing value is treated as enabled, so existing users require no backfill. When a user turns updates off, the app stores `email_updates_enabled: false` in that user's Supabase Auth `user_metadata`. Turning updates back on stores `true`.
+
+Users can change the preference from **Applications → Account settings → Email preferences**. Product-update sends to **All users** and **Selected users** automatically exclude accounts where the preference is `false`.
+
+Each registered-user product email also contains a signed **Unsubscribe from product updates** link. The link opens `/email/unsubscribe` and requires an explicit confirmation before changing the preference, so ordinary email-link scanners do not unsubscribe the user merely by fetching the URL. Confirming the action writes the same `email_updates_enabled: false` metadata used by Account settings.
+
+Custom email addresses are one-off direct recipients and do not have a Job Tracker account preference. Authentication, password-recovery, magic-link, and important account/security emails remain separate from the product-update preference.
 
 ## 4. Understand the admin trust boundary
 
@@ -134,10 +151,11 @@ After deployment:
 4. Complete the invitation in a separate/private browser session.
 5. Verify the user can access only their own applications and resumes.
 6. Test recovery and magic-link flows before inviting real users.
-7. Configure the Resend variables, compose a harmless update, and use **Send test** first.
+7. Configure the Resend variables and `EMAIL_UNSUBSCRIBE_SECRET`, compose a harmless update, and use **Send test** first.
 8. Confirm the sender/domain/template render correctly.
-9. Test **Selected users** with only your own test account before using **All users**.
-10. Verify deleting the test user removes the expected database/storage data.
+9. Open the test user's Account settings, turn product updates off, and confirm an **All users** or **Selected users** send excludes that account.
+10. Turn the preference back on, send a test product update to that account, open its unsubscribe link, confirm the opt-out, and verify Account settings now shows product updates off.
+11. Verify deleting the test user removes the expected database/storage data.
 
 Do not perform the first production test with irreplaceable data or a real audience.
 
@@ -150,11 +168,11 @@ For an internet-accessible deployment:
 - keep `/admin` out of search/navigation where it is not needed
 - add platform-level access controls, WAF rules, or identity-aware proxy protection for `/admin` where practical
 - add rate limiting for login/admin API endpoints if the deployment will receive significant untrusted traffic
-- keep deployment logs free of secrets, service-role tokens, and Resend API keys
+- keep deployment logs free of secrets, service-role tokens, Resend API keys, and unsubscribe signing secrets
 - restrict access to deployment environment settings
 - keep database backups and test restores before schema changes
 - always send a test email before sending a production update
-- add an application-owned opt-out preference before using product-update email at significant scale
+- keep product/changelog mail separate from essential authentication and account-security messages
 
 The application-level admin cookie should not be treated as a replacement for infrastructure protection on a high-value or large multi-user deployment.
 
@@ -203,8 +221,9 @@ If an admin secret is exposed:
 2. Replace `ADMIN_SESSION_SECRET` so existing admin sessions become invalid.
 3. Rotate `SUPABASE_SERVICE_ROLE_KEY` in Supabase if that key may have been exposed.
 4. Rotate `RESEND_API_KEY` if that key may have been exposed.
-5. Update the deployment environment immediately.
-6. Redeploy.
-7. Review deployment/application logs for suspicious admin activity.
+5. Rotate `EMAIL_UNSUBSCRIBE_SECRET` if unsubscribe tokens may have been exposed; old unsubscribe links will become invalid after rotation.
+6. Update the deployment environment immediately.
+7. Redeploy.
+8. Review deployment/application logs for suspicious admin activity.
 
 If a repository vulnerability may have exposed user data, follow [SECURITY.md](SECURITY.md) and your incident-response process rather than discussing sensitive details in a public issue.

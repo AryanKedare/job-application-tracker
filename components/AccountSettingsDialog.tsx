@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ApplicationStage, JobApplication } from '@/lib/types'
 import { formatLocalDate, formatLocalDateTime } from '@/lib/date'
@@ -8,7 +8,7 @@ import { resumeStoragePath, spreadsheetSafe } from '@/lib/resume-storage'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Settings, Download, Trash2, AlertTriangle, CheckCircle2, User, Mail, Shield } from 'lucide-react'
+import { Settings, Download, Trash2, AlertTriangle, CheckCircle2, User, Mail, Shield, BellRing } from 'lucide-react'
 
 interface Props {
   open: boolean
@@ -85,9 +85,65 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [exportSuccess, setExportSuccess] = useState<string | null>(null)
+  const [emailUpdatesEnabled, setEmailUpdatesEnabled] = useState(true)
+  const [preferenceLoading, setPreferenceLoading] = useState(false)
+  const [preferenceSaving, setPreferenceSaving] = useState(false)
+  const [preferenceMessage, setPreferenceMessage] = useState<{ text: string; error: boolean } | null>(null)
 
   const CONFIRM_PHRASE = 'delete my data'
   const canConfirm = confirmInput.trim().toLowerCase() === CONFIRM_PHRASE
+
+  useEffect(() => {
+    if (!open || !userId) return
+    let active = true
+
+    const loadPreference = async () => {
+      setPreferenceLoading(true)
+      setPreferenceMessage(null)
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser()
+        if (error || !user || user.id !== userId) throw error ?? new Error('User session is unavailable.')
+        if (active) setEmailUpdatesEnabled(user.user_metadata?.email_updates_enabled !== false)
+      } catch (error) {
+        console.error('Email preference load failed:', error)
+        if (active) setPreferenceMessage({ text: 'Could not load your email preference.', error: true })
+      } finally {
+        if (active) setPreferenceLoading(false)
+      }
+    }
+
+    void loadPreference()
+    return () => { active = false }
+  }, [open, userId])
+
+  const handleEmailPreferenceChange = async (enabled: boolean) => {
+    setPreferenceSaving(true)
+    setPreferenceMessage(null)
+    try {
+      const { data: { user }, error: getError } = await supabase.auth.getUser()
+      if (getError || !user || user.id !== userId) throw getError ?? new Error('User session is unavailable.')
+
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          ...(user.user_metadata ?? {}),
+          email_updates_enabled: enabled,
+          email_updates_changed_at: new Date().toISOString(),
+        },
+      })
+      if (error) throw error
+
+      setEmailUpdatesEnabled(enabled)
+      setPreferenceMessage({
+        text: enabled ? 'Product update emails are enabled.' : 'Product update emails are turned off.',
+        error: false,
+      })
+    } catch (error) {
+      console.error('Email preference save failed:', error)
+      setPreferenceMessage({ text: 'Could not save your email preference. Please try again.', error: true })
+    } finally {
+      setPreferenceSaving(false)
+    }
+  }
 
   const handleExport = async () => {
     setExporting(true)
@@ -152,6 +208,31 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
               </div>
               {userName && <div className="flex min-w-0 items-center gap-3 px-4 py-3"><User className="h-4 w-4 flex-shrink-0 text-slate-500" /><div className="min-w-0"><p className="text-xs text-slate-500">Name</p><p className="truncate text-sm font-medium text-slate-200">{userName}</p></div></div>}
               <div className="flex items-center gap-3 px-4 py-3"><Shield className="h-4 w-4 flex-shrink-0 text-slate-500" /><div><p className="text-xs text-slate-500">Applications tracked</p><p className="text-sm font-medium text-slate-200">{jobs.length}</p></div></div>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><BellRing className="h-3.5 w-3.5" />Email preferences</h3>
+            <div className="space-y-3 rounded-xl border border-slate-700/50 bg-slate-800/60 px-4 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-200">Product updates and changelogs</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">Receive emails about new Job Tracker features and product changes. Password recovery, magic links, and important account/security emails are not affected.</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={emailUpdatesEnabled}
+                  aria-label="Product update emails"
+                  disabled={preferenceLoading || preferenceSaving}
+                  onClick={() => void handleEmailPreferenceChange(!emailUpdatesEnabled)}
+                  className={`relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${emailUpdatesEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                >
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${emailUpdatesEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <p className="text-xs font-medium text-slate-400">{preferenceLoading ? 'Loading preference…' : preferenceSaving ? 'Saving…' : emailUpdatesEnabled ? 'Product update emails are on.' : 'Product update emails are off.'}</p>
+              {preferenceMessage && <p role={preferenceMessage.error ? 'alert' : 'status'} className={`text-xs ${preferenceMessage.error ? 'text-red-400' : 'text-emerald-400'}`}>{preferenceMessage.text}</p>}
             </div>
           </section>
 

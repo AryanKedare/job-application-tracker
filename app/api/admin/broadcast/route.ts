@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getAdminSupabase } from '@/lib/admin-supabase'
 import { rejectCrossOrigin, requireAdmin } from '@/lib/admin-request'
+import { createEmailUnsubscribeToken } from '@/lib/email-unsubscribe'
 import { getResendConfig, sendDirectEmails, sendTestEmail } from '@/lib/resend-broadcast'
 
 export const runtime = 'nodejs'
@@ -13,8 +14,10 @@ const MAX_ALL_RECIPIENTS = 10_000
 const MAX_DIRECT_RECIPIENTS = 1_000
 
 interface EmailContact {
+  userId?: string
   email: string
   name: string
+  emailUpdatesEnabled: boolean
 }
 
 function escapeHtml(value: string) {
@@ -55,24 +58,30 @@ function buildContent(options: {
   recipientName?: string
   testMode?: boolean
   registeredRecipient?: boolean
+  unsubscribeUrl?: string
 }) {
   const firstName = options.recipientName?.trim().split(/\s+/)[0] ?? ''
   const greeting = firstName ? `Hi ${escapeHtml(firstName)},` : 'Hi there,'
 
   const footer = options.testMode
     ? {
-        html: '<p style="margin:0;">This is a test of the Job Application Tracker update email.</p>',
-        text: `Job Application Tracker: ${options.siteUrl}\nThis is a test email.`,
+        html: '<p style="margin:0;">This is a test of the Job Application Tracker update email. Registered-user product emails include an unsubscribe link.</p>',
+        text: `Job Application Tracker: ${options.siteUrl}\nThis is a test email. Registered-user product emails include an unsubscribe link.`,
       }
-    : options.registeredRecipient
+    : options.registeredRecipient && options.unsubscribeUrl
       ? {
-          html: `<p style="margin:0;">This update was sent to your Job Application Tracker account. <a href="${escapeHtml(options.siteUrl)}" style="color:#94a3b8;">Open Job Application Tracker</a>.</p>`,
-          text: `This update was sent to your Job Application Tracker account.\n${options.siteUrl}`,
+          html: `<p style="margin:0 0 8px;">This product update was sent to your Job Application Tracker account. <a href="${escapeHtml(options.siteUrl)}" style="color:#94a3b8;">Open Job Application Tracker</a>.</p><p style="margin:0;"><a href="${escapeHtml(options.unsubscribeUrl)}" style="color:#94a3b8;text-decoration:underline;">Unsubscribe from product updates</a> or change this anytime in Account settings.</p>`,
+          text: `This product update was sent to your Job Application Tracker account.\n${options.siteUrl}\nUnsubscribe from product updates: ${options.unsubscribeUrl}\nYou can also change this anytime in Account settings.`,
         }
-      : {
-          html: `<p style="margin:0;">This one-off update was sent directly by Job Application Tracker. <a href="${escapeHtml(options.siteUrl)}" style="color:#94a3b8;">Open Job Application Tracker</a>.</p>`,
-          text: `This one-off update was sent directly by Job Application Tracker.\n${options.siteUrl}`,
-        }
+      : options.registeredRecipient
+        ? {
+            html: `<p style="margin:0;">This update was sent to your Job Application Tracker account. <a href="${escapeHtml(options.siteUrl)}" style="color:#94a3b8;">Open Job Application Tracker</a>.</p>`,
+            text: `This update was sent to your Job Application Tracker account.\n${options.siteUrl}`,
+          }
+        : {
+            html: `<p style="margin:0;">This one-off update was sent directly by Job Application Tracker. <a href="${escapeHtml(options.siteUrl)}" style="color:#94a3b8;">Open Job Application Tracker</a>.</p>`,
+            text: `This one-off update was sent directly by Job Application Tracker.\n${options.siteUrl}`,
+          }
 
   const cta = options.ctaLabel && options.ctaUrl
     ? `<p style="margin:28px 0;"><a href="${escapeHtml(options.ctaUrl)}" style="display:inline-block;border-radius:10px;background:#10b981;color:#04110d;padding:12px 18px;font-weight:700;text-decoration:none;">${escapeHtml(options.ctaLabel)}</a></p>`
@@ -128,7 +137,12 @@ async function listConfirmedUsers(selectedIds?: Set<string>): Promise<EmailConta
       const email = user.email?.trim().toLowerCase() ?? ''
       if (!email || !user.email_confirmed_at) continue
       const name = String(user.user_metadata?.full_name ?? user.user_metadata?.name ?? '').trim()
-      contacts.push({ email, name })
+      contacts.push({
+        userId: user.id,
+        email,
+        name,
+        emailUpdatesEnabled: user.user_metadata?.email_updates_enabled !== false,
+      })
 
       const limit = selectedIds ? MAX_DIRECT_RECIPIENTS : MAX_ALL_RECIPIENTS
       if (contacts.length > limit) throw new Error('The recipient limit has been exceeded.')
@@ -160,7 +174,7 @@ function parseCustomEmails(value: unknown): EmailContact[] {
   if (unique.length > MAX_DIRECT_RECIPIENTS) throw new Error('The direct recipient limit has been exceeded.')
   const invalid = unique.find((email) => email.length > 254 || !validEmail(email))
   if (invalid) throw new Error(`Invalid email address: ${invalid}`)
-  return unique.map((email) => ({ email, name: '' }))
+  return unique.map((email) => ({ email, name: '', emailUpdatesEnabled: true }))
 }
 
 export async function POST(request: NextRequest) {
@@ -216,20 +230,27 @@ export async function POST(request: NextRequest) {
         text: content.text,
         idempotencyKey: `admin-test-${requestId}`,
       })
-      return NextResponse.json({ ok: true, emailId, recipientCount: 1, sentCount: 1 })
+      return NextResponse.json({ ok: true, emailId, recipientCount: 1, sentCount: 1, skippedPreferenceCount: 0 })
     }
 
     let contacts: EmailContact[]
     let registeredRecipient = true
+    let skippedPreferenceCount = 0
 
     if (recipientMode === 'all') {
-      contacts = await listConfirmedUsers()
-      if (!contacts.length) return NextResponse.json({ error: 'There are no confirmed users to email.' }, { status: 400 })
+      const confirmed = await listConfirmedUsers()
+      if (!confirmed.length) return NextResponse.json({ error: 'There are no confirmed users to email.' }, { status: 400 })
+      contacts = confirmed.filter((contact) => contact.emailUpdatesEnabled)
+      skippedPreferenceCount = confirmed.length - contacts.length
+      if (!contacts.length) return NextResponse.json({ error: 'All confirmed users have opted out of product update emails.' }, { status: 400 })
     } else if (recipientMode === 'selected') {
       const selectedIds = parseSelectedIds(body?.selectedUserIds)
       if (!selectedIds.size) return NextResponse.json({ error: 'Select at least one confirmed user.' }, { status: 400 })
-      contacts = await listConfirmedUsers(selectedIds)
-      if (!contacts.length) return NextResponse.json({ error: 'None of the selected users can receive this update.' }, { status: 400 })
+      const selected = await listConfirmedUsers(selectedIds)
+      if (!selected.length) return NextResponse.json({ error: 'None of the selected users can receive this update.' }, { status: 400 })
+      contacts = selected.filter((contact) => contact.emailUpdatesEnabled)
+      skippedPreferenceCount = selected.length - contacts.length
+      if (!contacts.length) return NextResponse.json({ error: 'All selected users have opted out of product update emails.' }, { status: 400 })
     } else {
       contacts = parseCustomEmails(body?.customEmails)
       registeredRecipient = false
@@ -237,6 +258,9 @@ export async function POST(request: NextRequest) {
     }
 
     const emails = contacts.map((contact) => {
+      const unsubscribeUrl = registeredRecipient && contact.userId
+        ? `${siteUrl}/email/unsubscribe?token=${encodeURIComponent(createEmailUnsubscribeToken(contact.userId))}`
+        : ''
       const content = buildContent({
         subject,
         message,
@@ -245,6 +269,7 @@ export async function POST(request: NextRequest) {
         siteUrl,
         recipientName: contact.name,
         registeredRecipient,
+        unsubscribeUrl,
       })
       return { to: contact.email, subject, html: content.html, text: content.text }
     })
@@ -257,14 +282,15 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      recipientCount: contacts.length,
+      recipientCount: contacts.length + skippedPreferenceCount,
       sentCount,
+      skippedPreferenceCount,
       recipientMode,
     })
   } catch (error) {
     console.error('Admin Resend update email failed:', error)
     const errorMessage = error instanceof Error ? error.message : 'Could not send this update.'
-    const safeMessage = /configured|recipient limit|invalid email/i.test(errorMessage)
+    const safeMessage = /configured|recipient limit|invalid email|unsubscribe secret|EMAIL_UNSUBSCRIBE_SECRET/i.test(errorMessage)
       ? errorMessage
       : 'Could not send this update through Resend.'
     return NextResponse.json({ error: safeMessage }, { status: 500 })
