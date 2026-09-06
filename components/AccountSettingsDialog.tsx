@@ -133,10 +133,6 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
       if (error) throw error
 
       setEmailUpdatesEnabled(enabled)
-      setPreferenceMessage({
-        text: enabled ? 'Product update emails are enabled.' : 'Product update emails are turned off.',
-        error: false,
-      })
     } catch (error) {
       console.error('Email preference save failed:', error)
       setPreferenceMessage({ text: 'Could not save your email preference. Please try again.', error: true })
@@ -213,7 +209,7 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
 
           <section className="space-y-3">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400"><BellRing className="h-3.5 w-3.5" />Email preferences</h3>
-            <div className="space-y-2 rounded-xl border border-slate-700/50 bg-slate-800/60 px-4 py-3">
+            <div className="rounded-xl border border-slate-700/50 bg-slate-800/60 px-4 py-3">
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm font-medium text-slate-200">Product updates and changelogs</p>
                 <button
@@ -228,8 +224,7 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
                   <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${emailUpdatesEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
-              <p className="text-xs font-medium text-slate-400">{preferenceLoading ? 'Loading preference…' : preferenceSaving ? 'Saving…' : emailUpdatesEnabled ? 'Product update emails are on.' : 'Product update emails are off.'}</p>
-              {preferenceMessage && <p role={preferenceMessage.error ? 'alert' : 'status'} className={`text-xs ${preferenceMessage.error ? 'text-red-400' : 'text-emerald-400'}`}>{preferenceMessage.text}</p>}
+              {preferenceMessage?.error && <p role="alert" className="mt-2 text-xs text-red-400">{preferenceMessage.text}</p>}
             </div>
           </section>
 
