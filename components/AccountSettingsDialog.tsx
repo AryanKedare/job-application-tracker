@@ -117,6 +117,8 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
   }, [open, userId])
 
   const handleEmailPreferenceChange = async (enabled: boolean) => {
+    const previousValue = emailUpdatesEnabled
+    setEmailUpdatesEnabled(enabled)
     setPreferenceSaving(true)
     setPreferenceMessage(null)
     try {
@@ -131,10 +133,9 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
         },
       })
       if (error) throw error
-
-      setEmailUpdatesEnabled(enabled)
     } catch (error) {
       console.error('Email preference save failed:', error)
+      setEmailUpdatesEnabled(previousValue)
       setPreferenceMessage({ text: 'Could not save your email preference. Please try again.', error: true })
     } finally {
       setPreferenceSaving(false)
@@ -219,9 +220,9 @@ export default function AccountSettingsDialog({ open, setOpen, jobs, userId, use
                   aria-label="Product update emails"
                   disabled={preferenceLoading || preferenceSaving}
                   onClick={() => void handleEmailPreferenceChange(!emailUpdatesEnabled)}
-                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${emailUpdatesEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-200 ease-out disabled:cursor-not-allowed ${emailUpdatesEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
                 >
-                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${emailUpdatesEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-out ${emailUpdatesEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
               </div>
               {preferenceMessage?.error && <p role="alert" className="mt-2 text-xs text-red-400">{preferenceMessage.text}</p>}
