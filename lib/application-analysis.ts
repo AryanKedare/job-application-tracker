@@ -64,6 +64,15 @@ export interface ApplicationAnalysisSnapshot {
 const STATUSES: ApplicationStatus[] = ['Bookmarked', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Ghosted']
 const DAY_MS = 24 * 60 * 60 * 1000
 
+const CANONICAL_SOURCES: Array<{ label: string; patterns: RegExp[] }> = [
+  { label: 'LinkedIn', patterns: [/^linked\s*in(?:\b|\.com)/i] },
+  { label: 'IrishJobs', patterns: [/^irish\s*jobs?(?:\b|\.ie)/i] },
+  { label: 'Indeed', patterns: [/^indeed(?:\b|\.)/i] },
+  { label: 'Glassdoor', patterns: [/^glass\s*door(?:\b|\.)/i] },
+  { label: 'Jobs.ie', patterns: [/^jobs?\.ie\b/i] },
+  { label: 'RecruitIreland', patterns: [/^recruit\s*ireland(?:\b|\.)/i] },
+]
+
 function parseDate(value: string | null | undefined) {
   if (!value) return null
   const date = new Date(value)
@@ -100,6 +109,24 @@ function recentMonthKeys(now: Date, count: number) {
 function percent(numerator: number, denominator: number) {
   if (!denominator) return 0
   return Math.round((numerator / denominator) * 1000) / 10
+}
+
+function normalizeSource(value: string | null | undefined) {
+  const raw = value?.normalize('NFKC').replace(/\s+/g, ' ').trim()
+  if (!raw) return { key: 'unknown', label: 'Unknown' }
+
+  for (const source of CANONICAL_SOURCES) {
+    if (source.patterns.some((pattern) => pattern.test(raw))) {
+      return { key: source.label.toLowerCase(), label: source.label }
+    }
+  }
+
+  // Source details such as "LinkedIn - Referred" or "Referral - Employee"
+  // describe the same top-level source. Keep the original application value, but
+  // aggregate report statistics by the text before a spaced separator.
+  const base = raw.split(/\s+(?:-|–|—|\|)\s+/, 1)[0]?.trim() || raw
+  const key = base.toLocaleLowerCase('en').replace(/\s+/g, ' ')
+  return { key, label: base }
 }
 
 export function buildApplicationAnalysisSnapshot(
@@ -157,12 +184,17 @@ export function buildApplicationAnalysisSnapshot(
       if (monthCounts.has(key)) monthCounts.set(key, (monthCounts.get(key) ?? 0) + 1)
     }
 
-    const source = job.source?.trim() || 'Unknown'
-    const sourceRow = sourceStats.get(source) ?? { source, total: 0, interviewActivity: 0, offers: 0 }
+    const normalizedSource = normalizeSource(job.source)
+    const sourceRow = sourceStats.get(normalizedSource.key) ?? {
+      source: normalizedSource.label,
+      total: 0,
+      interviewActivity: 0,
+      offers: 0,
+    }
     sourceRow.total += 1
     if (hasInterviewActivity) sourceRow.interviewActivity += 1
     if (job.status === 'Offer') sourceRow.offers += 1
-    sourceStats.set(source, sourceRow)
+    sourceStats.set(normalizedSource.key, sourceRow)
 
     const rejectedStage = job.rejected_stage_name?.trim()
       || jobStages.find((stage) => stage.state === 'rejected')?.name?.trim()
@@ -176,7 +208,7 @@ export function buildApplicationAnalysisSnapshot(
       status: job.status,
       appliedAt: job.date_applied,
       location: job.location?.trim() || null,
-      source: job.source?.trim() || null,
+      source: normalizedSource.label,
       daysSinceActivity,
       stages: jobStages.map((stage) => ({ name: stage.name, state: stage.state })),
       sortDate: appliedDate?.getTime() ?? 0,
