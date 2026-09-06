@@ -1,10 +1,10 @@
 # Job Application Tracker
 
-A self-hosted job application tracker built with **Next.js**, **Supabase**, **Tailwind CSS**, and optional **Groq AI**.
+A self-hosted job application tracker built with **Next.js**, **Supabase**, **Tailwind CSS**, **Resend**, and optional **Groq AI**.
 
-Track applications, interview rounds, assessments, resumes, notes, lifecycle history, and outcomes in one place.
+Track applications, lifecycle stages, resumes, notes, outcomes, company logos, and AI-generated pipeline insights in one place.
 
-> Registration is invitation-only. When access requests are enabled, the login page checks whether the entered email already belongs to an account before preparing an access-request email.
+> Registration is invitation-only. The application is intended for personal or small-team deployments where the operator controls the Supabase, Resend, Groq, and hosting accounts.
 
 ## Features
 
@@ -12,20 +12,42 @@ Track applications, interview rounds, assessments, resumes, notes, lifecycle his
 
 - Add, edit, and delete job applications
 - Track `Bookmarked`, `Applied`, `Interviewing`, `Offer`, `Rejected`, and `Ghosted`
-- Search by company, role, location, or interview stage
-- Filter by application status
-- Store job links, source, notes, dates, and resumes
-- View lightweight application/interview/offer statistics
+- Search and filter by company, role, location, source, status, or lifecycle stage
+- Store job links, dates, notes, job-description text, and resumes
+- Export application data to CSV
 
 ### Application lifecycle
 
-Each application can have its own ordered interview and assessment pipeline. You can add custom stages, start/complete/skip/reject stages, reorder future stages, and preserve append-only lifecycle history.
+Each application can have an ordered interview/assessment pipeline. Users can add custom stages, start/complete/skip/reject stages, reorder future stages, and retain append-only lifecycle history.
 
 ### AI-assisted job import
 
-Paste a job-posting URL to extract role, company, location, source, summary, responsibilities, qualifications, and preferred skills. Groq is optional; without it the importer falls back to page metadata and JSON-LD.
+Paste a public job-posting URL and Job Tracker attempts to extract:
 
-The importer resolves and validates public addresses before connecting, pins outbound requests to vetted IP addresses, and repeats validation for redirects.
+- job title
+- company
+- location
+- source
+- job summary
+- responsibilities
+- required qualifications
+- preferred skills
+
+The importer first uses structured page data, JSON-LD, embedded SPA data, and supported platform-specific APIs such as Oracle Recruiting. Groq is then used as a structured extraction/normalization layer when configured.
+
+`GROQ_IMPORT_MODEL` is separate from the logo and analysis models so each task can use an appropriate cost/quality profile.
+
+### Automatic company logos
+
+The dashboard resolves a saved company name to an official company domain, discovers a safe raster favicon/logo, and falls back to Groq Compound Mini web search only when normal official-site discovery fails.
+
+Resolved public company metadata is stored in the server-only `company_logo_cache` table so Vercel cold starts do not repeatedly spend AI credits on the same company.
+
+### AI application analysis PDF
+
+Users can request a detailed AI-assisted application analysis from **Account settings → AI analysis**. The server calculates deterministic pipeline metrics, asks the configured analysis model for structured observations/recommendations, generates a PDF, and emails it to the user's confirmed account address through Resend.
+
+Users can also opt in to an automatic month-end analysis email. The recurring option is off by default and is controlled independently from product/changelog email preferences.
 
 ### Authentication and administration
 
@@ -34,9 +56,11 @@ The importer resolves and validates public addresses before connecting, pins out
 - Password recovery
 - Invitation-only onboarding
 - Single-use invite codes
-- Optional access-request flow with an existing-account check
+- Optional access-request flow
 - Server-side admin portal at `/admin`
 - User invitations, recovery links, magic links, profile updates, and deletion
+- Admin product/update emails to all users, selected users, or custom email addresses
+- User-controlled product/changelog email opt-out and signed unsubscribe flow
 - Supabase Row-Level Security for user data isolation
 
 ### Private resumes
@@ -46,7 +70,7 @@ The importer resolves and validates public addresses before connecting, pins out
 - Per-user storage folders
 - Bucket-relative object paths stored in the database
 - Short-lived signed URLs for resume access
-- Cleanup for failed uploads and resume replacement
+- Cleanup for failed uploads, replacement, application deletion, and account deletion
 
 ## Technology stack
 
@@ -58,87 +82,53 @@ The importer resolves and validates public addresses before connecting, pins out
 | Database | Supabase PostgreSQL |
 | Authentication | Supabase Auth |
 | File storage | Supabase Storage |
-| AI extraction | Groq API, optional |
+| Email delivery | Resend API; Supabase Auth email can use Resend SMTP |
+| AI | Groq API, optional |
 | Deployment | Vercel or another Node.js-compatible platform |
 
-## Quick start
+## One-time setup
 
-### 1. Clone and install
+Fresh deployments have one canonical setup path:
 
-```bash
-git clone https://github.com/AryanKedare/job-application-tracker.git
-cd job-application-tracker
-npm install
-```
+1. Clone the repository and install dependencies.
+2. Create a Supabase project.
+3. Run the complete `supabase/setup.sql` once in the Supabase SQL Editor.
+4. Configure Supabase Auth URLs/templates.
+5. Configure environment variables from `.env.example`.
+6. Optionally configure Resend and Groq.
+7. Deploy and invite the first user from `/admin`.
 
-### 2. Create a Supabase project
+Use **[docs/ONE_TIME_SETUP.md](docs/ONE_TIME_SETUP.md)** for the complete step-by-step setup.
 
-Create a Supabase project and collect:
+For a fresh installation, do **not** assemble SQL from old commits or dated migrations. `supabase/setup.sql` is the canonical, idempotent database/storage setup and also serves as the supported upgrade path for older installations.
 
-- project URL
-- anon/public key
-- service-role key
+## Database setup
 
-The service-role key must remain server-side.
+The canonical SQL creates/configures:
 
-### 3. Run the canonical database setup
-
-For a fresh installation, run the complete contents of:
-
-```text
-supabase/setup.sql
-```
-
-That single setup file creates or configures:
-
-- `job_applications`
-- `application_stages`
-- `application_stage_events`
-- `invite_codes`
+- `public.job_applications`
+- `public.application_stages`
+- `public.application_stage_events`
+- `public.invite_codes`
+- `public.company_logo_cache`
 - indexes and constraints
 - Row-Level Security policies
-- lifecycle/event triggers
+- lifecycle/event trigger functions
 - append-only lifecycle history
-- the private `resumes` bucket
-- per-user resume read/write policies
-- conversion of recognized legacy public resume URLs to object paths
+- private `resumes` Storage bucket
+- PDF size/MIME restrictions
+- per-user resume Storage policies
 
-Fresh installations do **not** need to run the dated security migration. `supabase/migrations/20260831_security_hardening.sql` is retained only for older deployments that need to apply the original hardening changes without re-running the current `setup.sql`.
+## Environment variables
 
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for fresh-install, upgrade, verification, and troubleshooting steps.
+Start from `.env.example`.
 
-### 4. Configure Supabase authentication URLs
-
-For local development:
-
-```text
-Site URL: http://localhost:3000
-```
-
-Add redirect URLs such as:
-
-```text
-http://localhost:3000/**
-http://localhost:3000/auth/callback
-http://localhost:3000/reset-password**
-```
-
-Use your deployed HTTPS domain instead of `localhost` in production.
-
-### 5. Configure environment variables
-
-Copy `.env.example` to `.env.local` and replace every placeholder:
-
-```bash
-cp .env.example .env.local
-```
-
-Required values:
+### Required core configuration
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL=https://your-domain.example
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 ADMIN_EMAIL=admin@example.com
@@ -146,136 +136,102 @@ ADMIN_PASSWORD=replace-with-a-long-random-password
 ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
 ```
 
-Optional access-request contact:
+### Optional access request
 
 ```env
 NEXT_PUBLIC_ACCESS_REQUEST_EMAIL=
 ```
 
-Set `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` only in your deployment environment if you want the login page to show **Request access**. If it is blank or unset, the button and the account-check endpoint are disabled.
+Leave it blank to hide the **Request access** flow.
 
-Optional values:
+### Resend-powered application mail
+
+```env
+RESEND_API_KEY=
+RESEND_FROM=Job Tracker <updates@your-domain.example>
+EMAIL_UNSUBSCRIBE_SECRET=replace-with-a-long-random-secret
+```
+
+These values enable admin update emails, signed product-update unsubscribe links, and emailed analysis PDFs. They are separate from any Supabase Auth SMTP configuration used for password recovery or magic links.
+
+### Groq AI
 
 ```env
 GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_IMPORT_MODEL=openai/gpt-oss-20b
+GROQ_LOGO_MODEL=llama-3.1-8b-instant
+GROQ_LOGO_WEB_MODEL=groq/compound-mini
+GROQ_ANALYSIS_MODEL=openai/gpt-oss-20b
+```
+
+Task-specific model variables are optional; the application has defaults/fallbacks. The split prevents simple logo resolution from using the same model as long-form job extraction or detailed application analysis.
+
+### Month-end analysis automation
+
+```env
+CRON_SECRET=replace-with-a-long-random-secret
+```
+
+`vercel.json` schedules `/api/cron/monthly-analysis` for 18:00 UTC on days 28-31. The route sends only when the current UTC date is actually the final day of the month and only to users who explicitly enabled **Monthly analysis email**.
+
+### Maintenance mode
+
+```env
 MAINTENANCE_MODE=false
 ```
 
-Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, or `GROQ_API_KEY` with a `NEXT_PUBLIC_` prefix.
+Never expose `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, `RESEND_API_KEY`, `EMAIL_UNSUBSCRIBE_SECRET`, `CRON_SECRET`, or `GROQ_API_KEY` with a `NEXT_PUBLIC_` prefix.
 
-Generate a strong admin session secret with:
+## Vercel deployment behavior
 
-```bash
-node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+Automatic Git deployments are intentionally disabled in `vercel.json`:
+
+```json
+{
+  "git": {
+    "deploymentEnabled": false
+  }
+}
 ```
 
-### 6. Start the application
+Pushes and pull-request updates therefore do not automatically create Vercel Preview/Production deployments. Deploy manually when you are ready to publish a release. After changing `vercel.json`, cron configuration, environment variables, or server code, perform a manual Production deployment for those changes to become live.
 
-```bash
-npm run dev
-```
+## Privacy and AI data handling
 
-Open:
+The analysis model receives only pipeline metadata needed for the report, such as company, role, status, dates, source/location, and lifecycle stages. It does not receive the user's email address, resume files, resume storage paths, private notes, passwords, or authentication tokens.
 
-- `http://localhost:3000`
-- `http://localhost:3000/admin`
+Company-logo AI receives only the company name and previously inferred public domain information.
 
-Use the admin portal to invite the first user.
-
-## Invitation and access-request flow
-
-Existing users can sign in by password or magic link. A person with a valid single-use invite code can create an account from the login page.
-
-When `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` is configured, someone without an invite can enter their email and select **Request access**. Before a mail draft is opened, `/api/access-request` checks Supabase Auth for an exact email match using the server-side service-role client.
-
-- If the account already exists, the user stays on the login page and is told to sign in with their existing credentials or use password recovery.
-- If the account does not exist, the browser opens the configured email application with a pre-filled access request containing the entered email.
-- The account-check endpoint is same-origin restricted, rate-limited on a best-effort basis, and disabled when access requests are not configured.
-
-The request template is:
-
-```text
-Subject: Access request - Job Application Tracker
-
-Hello,
-
-I'd like to request access to Job Application Tracker.
-
-Name:
-Email: <entered email>
-Reason for access:
-
-Thanks.
-```
-
-The mail client still requires the requester to press **Send**; the application itself does not send email on their behalf or include mail-provider credentials.
-
-Because the requested UX explicitly distinguishes existing from non-existing accounts, this flow reveals whether a submitted email is registered. Operators who do not want that behavior should leave `NEXT_PUBLIC_ACCESS_REQUEST_EMAIL` unset.
-
-## Application lifecycle
-
-Each application can have an ordered stage pipeline, for example:
-
-```text
-Applied
-Recruiter Screening
-Coding Assessment
-Technical Interview - Round 1
-Technical Interview - Round 2
-Final Interview
-```
-
-Starting an interview stage moves the high-level application status to `Interviewing`. Rejecting a stage records the rejection timestamp and stage name. Lifecycle event rows are generated by trigger functions and are read-only to normal authenticated users.
-
-## Resume security
-
-Resume files are stored in the private `resumes` bucket under paths such as:
-
-```text
-<user-id>/<uuid>.pdf
-```
-
-The database keeps that bucket-relative object path in the historical `resume_url` column. The client requests a short-lived signed URL only when the authenticated owner opens the resume.
-
-The upload flow also attempts to clean up newly uploaded files when the application save fails, and removes the previous resume only after a successful replacement is stored in the database.
-
-## Job import security
-
-`/api/jobs/import` is authenticated and treats the supplied job URL as untrusted input. The server:
-
-- permits HTTP/HTTPS URLs only
-- rejects private/reserved address ranges
-- resolves the destination before connecting
-- pins the request to the vetted IP address
-- preserves the original Host header and TLS SNI
-- repeats validation for each redirect
-- limits redirects, time, response type, and response size
+Job import necessarily processes the job-posting content being imported.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for the security model and vulnerability-reporting guidance.
+The application includes:
 
-Before exposing a deployment to the internet:
+- owner-scoped RLS for application/stage data
+- read-only lifecycle history for normal users
+- server-only invite-code and company-logo cache tables
+- private resume storage
+- signed resume URLs
+- SSRF/private-network protections for job import and logo fetching
+- server-only admin, Resend, Groq, cron, and service-role secrets
 
-- use unique production credentials
-- keep the service-role key server-only
-- keep the resume bucket private
-- verify RLS policies
-- configure only trusted auth redirect URLs
-- add rate limiting or edge protection appropriate to your deployment
-- run dependency and secret scanning
+See **[SECURITY.md](SECURITY.md)** before exposing a deployment to the internet.
 
 ## Documentation
 
-- [Installation and database setup](docs/INSTALLATION.md)
-- [Admin portal setup](ADMIN_SETUP.md)
-- [Security policy](SECURITY.md)
+- [One-time setup](docs/ONE_TIME_SETUP.md)
+- [Admin portal and email setup](ADMIN_SETUP.md)
+- [AI models, analysis reports, and automation](docs/AI_ANALYSIS.md)
+- [Automatic company logos](docs/COMPANY_LOGOS.md)
 - [Public release checklist](docs/PUBLIC_RELEASE.md)
+- [Security policy](SECURITY.md)
 
 ## Useful commands
 
 ```bash
+npm install
 npm run dev
 npm run lint
 npm run build
@@ -284,8 +240,8 @@ npm run start
 
 ## Contributing
 
-Contributions can be submitted through focused pull requests. Before opening a PR, run the lint and build commands and avoid committing credentials, `.env.local`, resumes, or database exports.
+Use focused pull requests and avoid committing credentials, `.env.local`, resumes, production database exports, or private user data.
 
 ## License
 
-No `LICENSE` file is currently included. The source may be publicly visible, but do not describe the repository as open source until a license has been intentionally selected and added.
+No `LICENSE` file is currently included. The repository is source-visible, but it should not be described as open source until a license is intentionally selected and added.

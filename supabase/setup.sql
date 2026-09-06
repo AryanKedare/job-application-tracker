@@ -1,10 +1,11 @@
 -- Job Application Tracker - canonical Supabase setup
 --
--- Public-release setup: run this entire file in Supabase SQL Editor.
--- It is intentionally idempotent and is the only SQL file required for a fresh
--- installation. It can also be re-run on an existing installation to bring the
--- database, lifecycle history, and resume storage policies to the current secure
--- defaults.
+-- Fresh install: run this entire file once in Supabase SQL Editor.
+-- Upgrade: back up first, then re-run this current file.
+--
+-- This file is intentionally idempotent and is the only SQL file required by the
+-- current application. It creates/configures application data, lifecycle history,
+-- invite-code storage, persistent company-logo caching, and private resume storage.
 --
 -- Existing application rows are preserved. Existing Bookmarked applications are
 -- not changed; only the default for NEW applications is Applied.
@@ -125,7 +126,7 @@ create index if not exists application_stages_application_position_idx
 create index if not exists application_stages_user_idx
   on public.application_stages(user_id);
 
--- At most one round can be actively in progress for an application.
+-- At most one stage can be actively in progress for an application.
 create unique index if not exists application_stages_one_current_idx
   on public.application_stages(application_id)
   where state = 'current';
@@ -457,8 +458,8 @@ after update of status on public.job_applications
 for each row
 execute function public.log_application_status_event();
 
--- Existing applications receive a single starting history record without changing
--- their application status. This is a no-op for applications already in history.
+-- Existing applications receive one starting history record without changing
+-- their status. This is a no-op for applications that already have history.
 insert into public.application_stage_events (
   application_id,
   user_id,
@@ -506,7 +507,31 @@ revoke all on table public.invite_codes from public, anon, authenticated;
 grant select, insert, update, delete on table public.invite_codes to service_role;
 
 -- -----------------------------------------------------------------------------
--- 7. Private resume storage bucket
+-- 7. Persistent company-logo resolution cache
+-- -----------------------------------------------------------------------------
+
+create table if not exists public.company_logo_cache (
+  company_key text primary key check (char_length(company_key) between 1 and 200),
+  domain text,
+  official_url text,
+  logo_url text,
+  resolver_model text,
+  resolved_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create index if not exists company_logo_cache_expires_at_idx
+  on public.company_logo_cache(expires_at);
+
+alter table public.company_logo_cache enable row level security;
+
+-- The cache contains only public company website/logo metadata, but browser roles
+-- do not need direct access. All reads/writes happen through server-side code.
+revoke all on table public.company_logo_cache from public, anon, authenticated;
+grant select, insert, update, delete on table public.company_logo_cache to service_role;
+
+-- -----------------------------------------------------------------------------
+-- 8. Private resume storage bucket
 -- -----------------------------------------------------------------------------
 
 insert into storage.buckets (
@@ -532,8 +557,7 @@ set name = excluded.name,
 alter table storage.objects enable row level security;
 
 -- Remove legacy resume SELECT policies before installing the canonical owner-only
--- read policy. This also removes the previous public-release migration policy when
--- the setup file is re-run.
+-- read policy. This also removes older public-resume policies when setup is re-run.
 do $$
 declare
   resume_select_policy record;

@@ -2,23 +2,20 @@
 
 The admin portal is available at `/admin` and uses server-only environment credentials plus a signed HTTP-only admin session cookie.
 
-This admin model is intentionally simple and is best suited to personal or small-team deployments. For a public internet deployment, additionally protect `/admin` at the infrastructure layer where practical.
+This admin model is intentionally simple and is best suited to personal or small-team deployments. For an internet-facing deployment, add infrastructure-level protection around `/admin` where practical.
 
-## 1. Complete the canonical Supabase setup
+## Prerequisite
 
-Before using the admin portal, run the current complete:
+Complete the canonical one-time setup first:
 
-```text
-supabase/setup.sql
-```
+- [docs/ONE_TIME_SETUP.md](docs/ONE_TIME_SETUP.md)
+- `supabase/setup.sql`
 
-Fresh installations do not require any additional security migration. The setup file creates/configures the application tables, lifecycle tables and triggers, invite-code storage, Row-Level Security policies, and private resume Storage policies.
+The canonical SQL creates the application/lifecycle tables, invite-code storage, company-logo cache, Row-Level Security policies, lifecycle triggers, and private resume Storage configuration. Fresh installations do not require separate migration files.
 
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the complete installation and upgrade process.
+## Admin secrets
 
-## 2. Configure admin secrets
-
-Add these values to `.env.local` for development or to the server-side environment settings of your deployment platform:
+Configure these server-side values:
 
 ```env
 ADMIN_EMAIL=admin@example.com
@@ -27,7 +24,7 @@ ADMIN_SESSION_SECRET=use-a-long-random-secret
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 ```
 
-The application also requires:
+The application also requires the normal Supabase public configuration:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -35,195 +32,159 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 NEXT_PUBLIC_SITE_URL=https://your-domain.example
 ```
 
-Never use a `NEXT_PUBLIC_` prefix for:
+Never use a `NEXT_PUBLIC_` prefix for the admin password, session secret, or service-role key.
 
-- `ADMIN_PASSWORD`
-- `ADMIN_SESSION_SECRET`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-The Supabase service-role key bypasses Row-Level Security and must never be sent to browser code, included in client logs, or committed to Git.
-
-Generate a strong admin session secret with:
+Generate a strong session secret with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-Use a unique administrator password that is not reused for Supabase, GitHub, Vercel, email, or any other service.
+Use a unique administrator password that is not reused for Supabase, GitHub, Vercel, email, or another service.
 
-## 3. Configure Resend admin update emails
+## What the admin portal can do
 
-Password-recovery and magic-link emails can continue to use your existing Supabase Auth + Resend SMTP configuration. The admin update-email composer is separate: it calls the Resend API server-side.
+The service-role-backed admin routes can:
 
-Supabase Auth remains the source of truth for Job Tracker users. The application does **not** copy users into Resend Contacts or Segments and does not require a Resend Segment ID. Resend is used only as the mail-delivery transport for these admin updates.
+- list/search users and application counts
+- invite users
+- generate single-use invite codes
+- edit user profile/name/email fields supported by the app
+- send password-recovery emails
+- send magic links
+- send product/site update emails
+- send a test update email before a real audience send
+- target all confirmed users, selected users, or custom email addresses
+- delete users and their application/resume data
 
-In Resend:
+Because the admin API uses the Supabase service role, `/admin` is a privileged trust boundary.
 
-1. Keep your sending domain verified.
-2. Create a sending API key for this deployment. A domain-scoped sending key is preferred when your Resend account supports that configuration; Contacts/Segments permissions are not required by this feature.
-3. Choose a sender address on the verified domain, for example `Job Tracker <updates@your-domain.example>`.
+## Invite codes
 
-Add the following server-only deployment variables:
+Invite codes are stored as SHA-256 hashes in `public.invite_codes` and are accessible only through server-side service-role operations. Browser roles have no direct table access.
+
+## Resend application email
+
+Supabase Auth email and Job Tracker application email are separate concerns:
+
+- password recovery / magic links / invitations can continue to use Supabase Auth email or Supabase + Resend SMTP
+- admin product/update mail and analysis PDFs use the Resend API directly from Job Tracker server routes
+
+Configure:
 
 ```env
-RESEND_API_KEY=
-RESEND_FROM=
-EMAIL_UNSUBSCRIBE_SECRET=
+RESEND_API_KEY=re_...
+RESEND_FROM=Job Tracker <updates@your-domain.example>
+EMAIL_UNSUBSCRIBE_SECRET=replace-with-a-long-random-secret
 ```
 
-`EMAIL_UNSUBSCRIBE_SECRET` signs the account-specific unsubscribe links included in product-update emails. Use at least 32 random characters. A convenient generator is:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
-```
-
-Do not prefix any of these values with `NEXT_PUBLIC_`, and do not commit production values to Git.
+No Resend Contacts or Segment configuration is required. Supabase Auth remains the source of truth for Job Tracker users.
 
 ### Recipient modes
 
-The admin dashboard provides three recipient modes:
+The update composer supports:
 
-- **All users** — the server reads all confirmed Supabase Auth users and sends directly to their current account addresses.
-- **Selected users** — the administrator selects confirmed Job Tracker users; the server resolves those user IDs against Supabase Auth before sending.
-- **Custom emails** — the administrator enters one-off addresses. These addresses are not added to Supabase Auth or to a Resend audience.
+- **All users** — current confirmed Supabase Auth users
+- **Selected users** — specific registered users selected by the administrator
+- **Custom emails** — one-off addresses entered manually
 
-All three modes use Resend Batch Email for delivery. Messages are sent individually rather than exposing recipients through To/CC/BCC lists. Direct sends are chunked into batches of at most 100 messages per Resend request.
+Selected/all-user recipients are resolved server-side. Custom addresses are not added to Supabase Auth or to a mailing-list database.
 
-The current application-side limits are:
+Direct sends use Resend's individual/batch email APIs so recipients are not exposed to one another through CC/BCC.
 
-- up to 10,000 confirmed users when **All users** is selected
-- up to 1,000 recipients for **Selected users** or **Custom emails**
+## Product-update preferences
 
-The composer also provides:
-
-- a subject field
-- a message field
-- an optional HTTPS call-to-action button
-- **Send test**, which sends the rendered template only to `ADMIN_EMAIL`
-- a confirmation step before every real send
-- the number of recipients accepted for delivery
-
-### Product-update preferences
-
-Registered Job Tracker users control product/changelog email delivery through the Supabase Auth metadata key:
+Registered users control product/changelog email delivery through Supabase Auth `user_metadata`:
 
 ```text
 email_updates_enabled
 ```
 
-A missing value is treated as enabled, so existing users require no backfill. When a user turns updates off, the app stores `email_updates_enabled: false` in that user's Supabase Auth `user_metadata`. Turning updates back on stores `true`.
+Missing value means enabled for existing accounts. Setting the preference to `false` excludes that registered user from product-update sends to **All users** and **Selected users**.
 
-Users can change the preference from **Applications → Account settings → Email preferences**. Product-update sends to **All users** and **Selected users** automatically exclude accounts where the preference is `false`.
+Users can change the setting from **Account settings → Email preferences**.
 
-Each registered-user product email also contains a signed **Unsubscribe from product updates** link. The link opens `/email/unsubscribe` and requires an explicit confirmation before changing the preference, so ordinary email-link scanners do not unsubscribe the user merely by fetching the URL. Confirming the action writes the same `email_updates_enabled: false` metadata used by Account settings.
+Registered-user product emails include a signed **Unsubscribe from product updates** link. The link opens a confirmation page before changing the preference so ordinary link scanners do not opt the user out merely by fetching the URL.
 
-Custom email addresses are one-off direct recipients and do not have a Job Tracker account preference. Authentication, password-recovery, magic-link, and important account/security emails remain separate from the product-update preference.
+The signing key is:
 
-## 4. Understand the admin trust boundary
+```env
+EMAIL_UNSUBSCRIBE_SECRET=...
+```
 
-The `/admin` portal is more privileged than a normal application session because its server-side API routes can use the Supabase service-role client.
+Password recovery, magic links, invitations, security/account messages, and explicitly requested analysis reports do not depend on the product-update preference.
 
-The portal can:
+## AI analysis email
 
-- list users and application counts
-- search users
-- invite new users by name/email
-- generate single-use invite codes that expire after 15 minutes
-- edit a user's name or email
-- send password-recovery emails
-- send magic links
-- send a test update email through Resend
-- send update emails to all confirmed users, selected users, or custom addresses
-- delete a user and application data
-- remove files from that user's resume Storage folder
+Users can request **Application insights PDF** from Account settings. The server generates the report using the configured Groq analysis model, creates the PDF server-side, and sends it to the confirmed account address through Resend.
 
-Invite codes are stored only as SHA-256 hashes in `public.invite_codes`. Browser roles have no direct access to that table.
+Users can independently opt in to **Monthly analysis email**. This is off by default and does not share the product-update preference.
 
-Deleting a job application cascades its interview stages and lifecycle event records through the database relationships configured in `supabase/setup.sql`.
+Monthly automation also requires:
 
-## 5. First administrator test
+```env
+CRON_SECRET=replace-with-a-long-random-secret
+```
+
+See [docs/AI_ANALYSIS.md](docs/AI_ANALYSIS.md) for model/privacy/automation details.
+
+## First administrator test
 
 After deployment:
 
 1. Open `/admin` over HTTPS.
-2. Sign in using `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
-3. Invite a test user.
+2. Sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+3. Invite a disposable test user.
 4. Complete the invitation in a separate/private browser session.
 5. Verify the user can access only their own applications and resumes.
-6. Test recovery and magic-link flows before inviting real users.
-7. Configure the Resend variables and `EMAIL_UNSUBSCRIBE_SECRET`, compose a harmless update, and use **Send test** first.
-8. Confirm the sender/domain/template render correctly.
-9. Open the test user's Account settings, turn product updates off, and confirm an **All users** or **Selected users** send excludes that account.
-10. Turn the preference back on, send a test product update to that account, open its unsubscribe link, confirm the opt-out, and verify Account settings now shows product updates off.
-11. Verify deleting the test user removes the expected database/storage data.
+6. Test password recovery and magic-link flows.
+7. Configure Resend and use **Send test** before any real update send.
+8. Test **All users**, **Selected users**, and **Custom emails** with disposable recipients.
+9. Turn product updates off in the test user's Account settings and verify product-update sends exclude that account.
+10. Re-enable the preference, send a product update, and test the signed unsubscribe confirmation flow.
+11. Request an AI analysis PDF from the test account if Groq/Resend are enabled.
+12. Toggle monthly analysis on/off and verify the preference persists.
+13. Delete the disposable user and verify application/resume cleanup.
 
-Do not perform the first production test with irreplaceable data or a real audience.
+Do not perform the first production validation using irreplaceable data or a real audience.
 
-## 6. Public deployment protections
+## Maintenance mode
 
-For an internet-accessible deployment:
-
-- use HTTPS only
-- use strong unique admin credentials and rotate them if exposed
-- keep `/admin` out of search/navigation where it is not needed
-- add platform-level access controls, WAF rules, or identity-aware proxy protection for `/admin` where practical
-- add rate limiting for login/admin API endpoints if the deployment will receive significant untrusted traffic
-- keep deployment logs free of secrets, service-role tokens, Resend API keys, and unsubscribe signing secrets
-- restrict access to deployment environment settings
-- keep database backups and test restores before schema changes
-- always send a test email before sending a production update
-- keep product/changelog mail separate from essential authentication and account-security messages
-
-The application-level admin cookie should not be treated as a replacement for infrastructure protection on a high-value or large multi-user deployment.
-
-## 7. Maintenance mode
-
-The app includes a maintenance mode for planned upgrades.
-
-Enable it with the server-side environment variable:
+Enable maintenance mode with:
 
 ```env
 MAINTENANCE_MODE=true
 ```
 
-While maintenance mode is enabled:
+While enabled, normal user-facing traffic is placed into maintenance behavior while admin routes remain available according to the application middleware.
 
-- normal visitors see the maintenance page on user-facing routes
-- non-admin API requests return HTTP `503 Service Unavailable`
-- `/admin` and `/api/admin/*` remain available
-- a browser with a valid signed admin session can bypass maintenance mode
-- Next.js static assets remain available
-
-### Test while maintenance mode is enabled
-
-1. Sign in at `/admin` in your normal browser.
-2. In that same browser, open `/jobs` or `/login`; the valid admin session can bypass maintenance mode.
-3. Open the production site in an incognito/private window and confirm ordinary visitors still see maintenance mode.
-4. Sign out of the admin portal and confirm the bypass disappears.
-
-There is no query-string maintenance bypass token.
-
-Restore normal access by setting:
+Restore normal access with:
 
 ```env
 MAINTENANCE_MODE=false
 ```
 
-or by removing the variable and redeploying.
+This variable is server-side and must not use a `NEXT_PUBLIC_` prefix.
 
-`MAINTENANCE_MODE` is server-side and must not use the `NEXT_PUBLIC_` prefix.
+## Vercel deployments
 
-## 8. Credential rotation
+Automatic Git deployments are disabled in `vercel.json`.
 
-If an admin secret is exposed:
+After changing admin credentials, Resend/Groq configuration, cron configuration, or application code, trigger a manual Production deployment in Vercel when you are ready to publish the change.
 
-1. Replace `ADMIN_PASSWORD`.
-2. Replace `ADMIN_SESSION_SECRET` so existing admin sessions become invalid.
-3. Rotate `SUPABASE_SERVICE_ROLE_KEY` in Supabase if that key may have been exposed.
-4. Rotate `RESEND_API_KEY` if that key may have been exposed.
-5. Rotate `EMAIL_UNSUBSCRIBE_SECRET` if unsubscribe tokens may have been exposed; old unsubscribe links will become invalid after rotation.
-6. Update the deployment environment immediately.
-7. Redeploy.
-8. Review deployment/application logs for suspicious admin activity.
+## Credential rotation
 
-If a repository vulnerability may have exposed user data, follow [SECURITY.md](SECURITY.md) and your incident-response process rather than discussing sensitive details in a public issue.
+If a secret is exposed:
+
+1. rotate the affected secret immediately
+2. replace `ADMIN_SESSION_SECRET` if admin sessions should be invalidated
+3. rotate `SUPABASE_SERVICE_ROLE_KEY` if it may have been exposed
+4. rotate `RESEND_API_KEY` if it may have been exposed
+5. rotate `EMAIL_UNSUBSCRIBE_SECRET` if unsubscribe signing is affected; old links will stop validating
+6. rotate `CRON_SECRET` if cron authorization is affected
+7. rotate `GROQ_API_KEY` if it may have been exposed
+8. update deployment environment values
+9. manually redeploy
+10. review relevant logs for suspicious activity
+
+For vulnerability reporting and broader security guidance, see [SECURITY.md](SECURITY.md).
