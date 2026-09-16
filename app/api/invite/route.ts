@@ -89,6 +89,23 @@ export async function POST(request: NextRequest) {
         if (!/already|registered|exists/i.test(inviteError.message)) throw inviteError
         const { error: recoveryError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
         if (recoveryError) throw recoveryError
+        // A valid, atomically claimed invite may approve an existing account.
+        // Never derive membership from the user's editable invitation flags.
+        let approved = false
+        for (let page = 1; page <= 100; page += 1) {
+          const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 })
+          if (error) throw error
+          const existing = data.users.find((user) => user.email?.toLowerCase() === email)
+          if (existing) {
+            const { error: membershipError } = await supabase.from('app_memberships')
+              .upsert({ user_id: existing.id }, { onConflict: 'user_id', ignoreDuplicates: true })
+            if (membershipError) throw membershipError
+            approved = true
+            break
+          }
+          if (data.users.length < 1000) break
+        }
+        if (!approved) throw new Error('Could not approve the invited account.')
       }
 
       return NextResponse.json({ ok: true })

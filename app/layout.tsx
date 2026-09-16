@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { connection } from 'next/server'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import AuthRecoveryRedirect from '@/components/AuthRecoveryRedirect'
@@ -34,7 +35,8 @@ export const viewport: Viewport = {
   themeColor: '#020617',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection()
   return (
     <html lang="en">
       <body className={`min-h-screen overflow-x-hidden bg-slate-950 antialiased ${inter.className}`}>

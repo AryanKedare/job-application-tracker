@@ -245,3 +245,7 @@ Use focused pull requests and avoid committing credentials, `.env.local`, resume
 ## License
 
 No `LICENSE` file is currently included. The repository is source-visible, but it should not be described as open source until a license is intentionally selected and added.
+
+## Security upgrade
+
+For the September 2026 security fixes, follow [the required database, Auth, and deployment steps](docs/SECURITY_UPGRADE.md). Run `npm ci`, `npm test`, `npm run lint`, `npm audit --audit-level=low`, and `npm run build` before deployment.

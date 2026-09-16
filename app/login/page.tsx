@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,6 +36,8 @@ function accessRequestHref(recipient: string, requesterEmail: string): string {
 }
 
 export default function LoginPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [method, setMethod] = useState<Method>('password')
   const [view, setView] = useState<View>('signin')
   const [email, setEmail] = useState('')
@@ -48,6 +51,10 @@ export default function LoginPage() {
   const [sentEmail, setSentEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  const displayError = error ?? (searchParams.get('error') === 'membership'
+    ? 'An active invitation is required. Contact the administrator if you already have access.'
+    : null)
 
   const resetFeedback = () => {
     setError(null)
@@ -153,7 +160,7 @@ export default function LoginPage() {
         password,
       })
       if (authError) throw authError
-      window.location.assign('/jobs')
+      router.push('/jobs')
     } catch {
       setError('Sign-in failed. Check your email and password, or reset your password.')
     } finally {
@@ -249,7 +256,7 @@ export default function LoginPage() {
               <Label htmlFor="invite-code">Invite code</Label>
               <Input id="invite-code" required autoComplete="off" value={inviteCode} onChange={(event) => setInviteCode(event.target.value.toUpperCase())} className="bg-slate-800 border-slate-700 font-mono" />
             </div>
-            {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+            {displayError && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{displayError}</p>}
             <Button type="submit" disabled={loading} className="h-11 w-full bg-violet-600 hover:bg-violet-700 font-semibold">{loading ? 'Checking…' : 'Continue'}</Button>
             <button type="button" onClick={() => { setView('signin'); resetFeedback() }} className="w-full text-sm font-medium text-slate-400 hover:text-white">Back to sign in</button>
           </form>
@@ -270,7 +277,7 @@ export default function LoginPage() {
           <form onSubmit={redeemInviteCode} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 sm:p-8">
             <div className="space-y-2"><Label htmlFor="invite-name">Name</Label><Input id="invite-name" required maxLength={100} autoComplete="name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} className="bg-slate-800 border-slate-700" /></div>
             <div className="space-y-2"><Label htmlFor="invite-email">Email</Label><Input id="invite-email" type="email" required maxLength={254} autoComplete="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="bg-slate-800 border-slate-700" /></div>
-            {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+            {displayError && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{displayError}</p>}
             <Button type="submit" disabled={loading} className="h-11 w-full bg-emerald-600 hover:bg-emerald-700 font-semibold">{loading ? 'Sending…' : 'Send password setup link'}</Button>
             <button type="button" onClick={() => { setView('invite-code'); resetFeedback() }} className="w-full text-sm font-medium text-slate-400 hover:text-white">Use a different invite code</button>
           </form>
@@ -311,7 +318,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          {error && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+          {displayError && <p role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">{displayError}</p>}
           {notice && (
             <div role="status" className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-200 space-y-3">
               <p>{notice}</p>

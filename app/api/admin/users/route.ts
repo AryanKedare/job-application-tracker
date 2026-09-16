@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminSupabase } from '@/lib/admin-supabase'
 import { rejectCrossOrigin, requireAdmin } from '@/lib/admin-request'
+import { deleteResumeFolder } from '@/lib/delete-resumes'
 
 interface AdminUserRow {
   id: string
@@ -36,21 +37,6 @@ async function jobCountsByUser(): Promise<Map<string, number>> {
     if (!data || data.length < 1000) break
   }
   return counts
-}
-
-async function deleteResumeFolder(userId: string) {
-  const supabase = getAdminSupabase()
-  for (let offset = 0; offset < 10_000; offset += 100) {
-    const { data, error } = await supabase.storage.from('resumes').list(userId, { limit: 100, offset })
-    if (error) throw error
-    if (!data?.length) break
-    const paths = data.filter((item) => item.name).map((item) => `${userId}/${item.name}`)
-    if (paths.length) {
-      const { error: removeError } = await supabase.storage.from('resumes').remove(paths)
-      if (removeError) throw removeError
-    }
-    if (data.length < 100) break
-  }
 }
 
 function validEmail(email: string): boolean {
@@ -186,13 +172,17 @@ export async function DELETE(request: NextRequest) {
 
   const body = await request.json().catch(() => null) as { userId?: unknown } | null
   const userId = typeof body?.userId === 'string' ? body.userId : ''
-  if (!userId) return NextResponse.json({ error: 'A user ID is required.' }, { status: 400 })
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) return NextResponse.json({ error: 'A valid user ID is required.' }, { status: 400 })
 
   try {
     const supabase = getAdminSupabase()
-    const { error: jobsError } = await supabase.from('job_applications').delete().eq('user_id', userId)
-    if (jobsError) throw jobsError
+    // Revoke access first so surviving sessions cannot add files while cleanup runs.
+    // Keep this tombstone on failure; repeating DELETE safely resumes cleanup.
+    const { error: membershipError } = await supabase.from('app_memberships')
+      .upsert({ user_id: userId, status: 'deleting' })
+    if (membershipError) throw membershipError
     await deleteResumeFolder(userId)
+    // Auth deletion cascades application rows only after storage is verified empty.
     const { error: userError } = await supabase.auth.admin.deleteUser(userId)
     if (userError) throw userError
     return NextResponse.json({ ok: true })

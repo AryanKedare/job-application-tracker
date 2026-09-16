@@ -92,6 +92,14 @@ export default function JobsPage() {
         return
       }
 
+      const { data: membership, error: membershipError } = await supabase
+        .from('app_memberships').select('status').eq('user_id', user.id).maybeSingle()
+      if (membershipError || membership?.status !== 'active') {
+        await supabase.auth.signOut()
+        router.replace('/login?error=membership')
+        return
+      }
+
       setUserId(user.id)
       setUserEmail(user.email ?? '')
       setUserName(user.user_metadata?.full_name || user.user_metadata?.name || null)
@@ -127,6 +135,8 @@ export default function JobsPage() {
     if (withSpinner) setLoading(false)
   }, [userId])
 
+  // This effect loads remote data and synchronizes its loading indicator.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (authChecked) void fetchData() }, [authChecked, fetchData])
 
   const handleStatusChange = async (id: string, newStatus: JobApplication['status']) => {

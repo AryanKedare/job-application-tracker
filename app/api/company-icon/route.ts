@@ -8,8 +8,10 @@ import { request as httpsRequest } from 'node:https'
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
 
 import { groqJson, groqWebJson } from '@/lib/groq'
+import { beginAiWork, finishAiWork, requireMembership, securityErrorResponse } from '@/lib/security-controls'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const REQUEST_TIMEOUT_MS = 8_000
 const WEB_LOOKUP_TIMEOUT_MS = 20_000
@@ -51,6 +53,11 @@ interface WebLogoCacheEntry extends WebLogoResult {
 interface GroqWebLogoResponse {
   official_url?: unknown
   logo_url?: unknown
+}
+
+const MAX_CACHE_ENTRIES = 500
+function trimCache<T>(cache: Map<string, T>) {
+  if (cache.size >= MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value!)
 }
 
 const domainCache = new Map<string, DomainCacheEntry>()
@@ -434,8 +441,8 @@ async function resolveCompanyDomain(company: string): Promise<string | null> {
   })()
 
   pendingDomainLookups.set(cacheKey, lookupPromise)
-  const domain = await lookupPromise
-  pendingDomainLookups.delete(cacheKey)
+  const domain = await lookupPromise.finally(() => pendingDomainLookups.delete(cacheKey))
+  trimCache(domainCache)
   domainCache.set(cacheKey, {
     domain,
     expiresAt: now + (domain ? POSITIVE_DOMAIN_TTL_MS : NEGATIVE_DOMAIN_TTL_MS),
@@ -488,8 +495,8 @@ async function resolveCompanyLogoFromWeb(company: string, knownDomain: string | 
   })()
 
   pendingWebLogoLookups.set(cacheKey, lookupPromise)
-  const resolved = await lookupPromise
-  pendingWebLogoLookups.delete(cacheKey)
+  const resolved = await lookupPromise.finally(() => pendingWebLogoLookups.delete(cacheKey))
+  trimCache(webLogoCache)
   const success = Boolean(resolved.officialUrl || resolved.logoUrl)
   webLogoCache.set(cacheKey, {
     ...resolved,
@@ -574,12 +581,25 @@ async function tryDomainLogoPaths(domain: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await authenticatedUser(request)
-  if (!user) return new NextResponse(null, { status: 401 })
+  let lease: string | undefined
+  try {
+    const user = await authenticatedUser(request)
+    if (!user) return new NextResponse(null, { status: 401 })
 
-  const company = request.nextUrl.searchParams.get('company')?.trim().slice(0, 200) ?? ''
-  if (!company) return new NextResponse(null, { status: 400 })
+    const company = request.nextUrl.searchParams.get('company')?.trim().slice(0, 200) ?? ''
+    if (!company) return new NextResponse(null, { status: 400 })
 
+    await requireMembership(user.id)
+    lease = await beginAiWork(user.id, 'logo')
+    return await findCompanyIcon(company)
+  } catch (error) {
+    return securityErrorResponse(error) ?? new NextResponse(null, { status: 503 })
+  } finally {
+    if (lease) await finishAiWork(lease)
+  }
+}
+
+async function findCompanyIcon(company: string) {
   const domain = await resolveCompanyDomain(company)
   if (domain) {
     const fastIcon = await tryDomainLogoPaths(domain)

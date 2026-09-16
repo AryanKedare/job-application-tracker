@@ -625,6 +625,220 @@ create policy "Users can delete their resumes"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+-- -----------------------------------------------------------------------------
+-- 9. Server-owned membership and shared abuse controls
+-- -----------------------------------------------------------------------------
+
+create table if not exists public.app_memberships (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  status text not null default 'active' check (status in ('active', 'deleting')),
+  created_at timestamptz not null default now()
+);
+alter table public.app_memberships enable row level security;
+revoke all on public.app_memberships from public, anon, authenticated;
+grant select on public.app_memberships to authenticated;
+grant all on public.app_memberships to service_role;
+drop policy if exists "Read own membership" on public.app_memberships;
+create policy "Read own membership" on public.app_memberships for select to authenticated
+  using (user_id = auth.uid());
+
+-- invited_at is maintained by Supabase Auth, unlike user-editable metadata.
+-- Do NOT grandfather every auth.users row: public signups may already exist.
+insert into public.app_memberships(user_id)
+select id from auth.users where invited_at is not null
+on conflict (user_id) do nothing;
+
+create or replace function public.register_invited_member()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.invited_at is not null then
+    insert into public.app_memberships(user_id) values (new.id)
+    on conflict (user_id) do nothing;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.register_invited_member() from public, anon, authenticated;
+drop trigger if exists register_invited_member on auth.users;
+create trigger register_invited_member after insert or update of invited_at on auth.users
+for each row execute function public.register_invited_member();
+
+create or replace function public.is_active_member()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.app_memberships where user_id = auth.uid() and status = 'active');
+$$;
+revoke all on function public.is_active_member() from public, anon;
+grant execute on function public.is_active_member() to authenticated;
+
+-- Restrictive policies also constrain any older permissive owner policies.
+drop policy if exists "Active membership required" on public.job_applications;
+create policy "Active membership required" on public.job_applications as restrictive
+for all to authenticated using (public.is_active_member()) with check (public.is_active_member());
+drop policy if exists "Active membership required" on public.application_stages;
+create policy "Active membership required" on public.application_stages as restrictive
+for all to authenticated using (public.is_active_member()) with check (public.is_active_member());
+drop policy if exists "Active membership required" on public.application_stage_events;
+create policy "Active membership required" on public.application_stage_events as restrictive
+for all to authenticated using (public.is_active_member()) with check (public.is_active_member());
+drop policy if exists "Resume membership required" on storage.objects;
+create policy "Resume membership required" on storage.objects as restrictive
+for all to authenticated using (bucket_id <> 'resumes' or public.is_active_member())
+with check (bucket_id <> 'resumes' or public.is_active_member());
+
+create table if not exists public.security_rate_limits (
+  key text primary key,
+  count integer not null,
+  expires_at timestamptz not null
+);
+create index if not exists security_rate_limits_expiry on public.security_rate_limits(expires_at);
+alter table public.security_rate_limits enable row level security;
+revoke all on public.security_rate_limits from public, anon, authenticated;
+grant all on public.security_rate_limits to service_role;
+
+-- All buckets are reserved in one transaction, with deterministic lock order.
+-- Rejected calls do not move the expiry or consume another bucket's allowance.
+create or replace function public.consume_security_budget(p_rules jsonb)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare
+  rule jsonb;
+  current_bucket public.security_rate_limits%rowtype;
+  retry_after integer := 0;
+  stamp timestamptz := clock_timestamp();
+begin
+  if jsonb_typeof(p_rules) <> 'array' or jsonb_array_length(p_rules) not between 1 and 10 then
+    raise exception 'Invalid budget rules';
+  end if;
+  for rule in select value from jsonb_array_elements(p_rules) order by value->>'key' loop
+    if length(rule->>'key') not between 1 and 200 or (rule->>'limit')::integer < 1
+       or (rule->>'seconds')::integer not between 1 and 86400 then
+      raise exception 'Invalid budget rule';
+    end if;
+    perform pg_advisory_xact_lock(hashtextextended(rule->>'key', 0));
+    select * into current_bucket from public.security_rate_limits where key = rule->>'key';
+    if found and current_bucket.expires_at > stamp and current_bucket.count >= (rule->>'limit')::integer then
+      retry_after := greatest(retry_after, ceil(extract(epoch from current_bucket.expires_at - stamp))::integer);
+    end if;
+  end loop;
+  if retry_after > 0 then return retry_after; end if;
+  for rule in select value from jsonb_array_elements(p_rules) loop
+    insert into public.security_rate_limits as b(key, count, expires_at)
+    values (rule->>'key', 1, stamp + make_interval(secs => (rule->>'seconds')::integer))
+    on conflict (key) do update set
+      count = case when b.expires_at <= stamp then 1 else b.count + 1 end,
+      expires_at = case when b.expires_at <= stamp then excluded.expires_at else b.expires_at end;
+  end loop;
+  delete from public.security_rate_limits where expires_at < stamp - interval '1 day';
+  return 0;
+end;
+$$;
+revoke all on function public.consume_security_budget(jsonb) from public, anon, authenticated;
+grant execute on function public.consume_security_budget(jsonb) to service_role;
+
+create table if not exists public.security_work_leases (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz not null default now() + interval '15 minutes'
+);
+create index if not exists security_work_leases_expiry on public.security_work_leases(expires_at);
+alter table public.security_work_leases enable row level security;
+revoke all on public.security_work_leases from public, anon, authenticated;
+grant all on public.security_work_leases to service_role;
+
+create or replace function public.reserve_ai_work(p_user_id uuid, p_kind text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  daily_limit integer;
+  minute_limit integer;
+  retry_after integer;
+  lease_id uuid;
+begin
+  if not exists (select 1 from public.app_memberships where user_id = p_user_id and status = 'active') then
+    return jsonb_build_object('denied', true);
+  end if;
+  case p_kind
+    when 'import' then daily_limit := 40; minute_limit := 6;
+    when 'logo' then daily_limit := 200; minute_limit := 60;
+    when 'analysis' then daily_limit := 6; minute_limit := 1;
+    else raise exception 'Unknown AI operation';
+  end case;
+  perform pg_advisory_xact_lock(hashtextextended('security:ai-work', 0));
+  delete from public.security_work_leases where expires_at <= clock_timestamp();
+  if (select count(*) from public.security_work_leases) >= 12
+     or (select count(*) from public.security_work_leases where user_id = p_user_id) >= 3 then
+    return jsonb_build_object('retry_after', 60);
+  end if;
+  retry_after := public.consume_security_budget(jsonb_build_array(
+    jsonb_build_object('key', 'ai:global:day', 'limit', 1000, 'seconds', 86400),
+    jsonb_build_object('key', 'ai:' || p_kind || ':' || p_user_id || ':day', 'limit', daily_limit, 'seconds', 86400),
+    jsonb_build_object('key', 'ai:' || p_kind || ':' || p_user_id || ':minute', 'limit', minute_limit, 'seconds', 60)
+  ));
+  if retry_after > 0 then return jsonb_build_object('retry_after', retry_after); end if;
+  insert into public.security_work_leases(user_id) values (p_user_id) returning id into lease_id;
+  return jsonb_build_object('lease_id', lease_id);
+end;
+$$;
+revoke all on function public.reserve_ai_work(uuid, text) from public, anon, authenticated;
+grant execute on function public.reserve_ai_work(uuid, text) to service_role;
+
+create table if not exists public.analysis_report_jobs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  window_key text not null,
+  status text not null default 'started' check (status in ('started', 'sent', 'failed')),
+  created_at timestamptz not null default now(),
+  finished_at timestamptz,
+  unique(user_id, window_key)
+);
+create index if not exists analysis_report_jobs_user_time on public.analysis_report_jobs(user_id, created_at desc);
+alter table public.analysis_report_jobs enable row level security;
+revoke all on public.analysis_report_jobs from public, anon, authenticated;
+grant all on public.analysis_report_jobs to service_role;
+
+create or replace function public.reserve_analysis_report(p_user_id uuid, p_period text default null)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  job_id uuid;
+  job_window text;
+begin
+  perform pg_advisory_xact_lock(hashtextextended('analysis:' || p_user_id, 0));
+  if not exists (select 1 from public.app_memberships where user_id = p_user_id and status = 'active') then
+    return null;
+  end if;
+  -- Keep failed/uncertain work reserved too. Retrying must not silently spend again.
+  if exists (select 1 from public.analysis_report_jobs where user_id = p_user_id
+      and created_at > clock_timestamp() - interval '15 minutes') then return null; end if;
+  if p_period is not null and p_period !~ '^\d{4}-(0[1-9]|1[0-2])$' then
+    raise exception 'Invalid analysis period';
+  end if;
+  job_window := case when p_period is null
+    then 'manual:' || floor(extract(epoch from clock_timestamp()) / 900)::text
+    else 'monthly:' || p_period end;
+  insert into public.analysis_report_jobs(user_id, window_key) values (p_user_id, job_window)
+  on conflict (user_id, window_key) do nothing returning id into job_id;
+  return job_id;
+end;
+$$;
+revoke all on function public.reserve_analysis_report(uuid, text) from public, anon, authenticated;
+grant execute on function public.reserve_analysis_report(uuid, text) to service_role;
+
+-- Keep the persistent logo cache bounded, including expired entries.
+create or replace function public.trim_company_logo_cache()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended('security:logo-cache', 0));
+  delete from public.company_logo_cache where expires_at < now();
+  delete from public.company_logo_cache where company_key in (
+    select company_key from public.company_logo_cache order by resolved_at desc offset 4999
+  );
+  return new;
+end;
+$$;
+revoke all on function public.trim_company_logo_cache() from public, anon, authenticated;
+drop trigger if exists trim_company_logo_cache on public.company_logo_cache;
+create trigger trim_company_logo_cache before insert on public.company_logo_cache
+for each row execute function public.trim_company_logo_cache();
+
+
 commit;
 
 -- Setup complete.

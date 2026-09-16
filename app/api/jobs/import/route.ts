@@ -8,8 +8,10 @@ import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage 
 import { request as httpsRequest } from 'node:https'
 
 import { groqJson } from '@/lib/groq'
+import { beginAiWork, finishAiWork, requireMembership, securityErrorResponse } from '@/lib/security-controls'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const MAX_HTML_BYTES = 1_000_000
 const MAX_API_BYTES = 1_000_000
@@ -527,6 +529,7 @@ async function authenticatedUser(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let lease: string | undefined
   try {
     const user = await authenticatedUser(request)
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -536,6 +539,9 @@ export async function POST(request: NextRequest) {
     if (!rawUrl || rawUrl.length > 2048) {
       return NextResponse.json({ error: 'A valid job URL is required.' }, { status: 400 })
     }
+
+    await requireMembership(user.id)
+    lease = await beginAiWork(user.id, 'import')
 
     let html = ''
     let finalUrl = rawUrl
@@ -576,7 +582,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(result)
-  } catch {
-    return NextResponse.json({ error: 'Could not import this job. Enter the details manually.' }, { status: 422 })
+  } catch (error) {
+    return securityErrorResponse(error) ?? NextResponse.json({ error: 'Could not import this job. Enter the details manually.' }, { status: 422 })
+  } finally {
+    if (lease) await finishAiWork(lease)
   }
 }

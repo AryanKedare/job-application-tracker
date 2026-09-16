@@ -100,7 +100,6 @@ export async function GET(request: NextRequest) {
         await sendApplicationAnalysisReport(user, {
           mode: 'monthly',
           periodKey: period,
-          idempotencyKey: `monthly-application-analysis-${user.id}-${period}`,
         })
         sent += 1
       } catch (error) {

@@ -242,6 +242,6 @@ export function buildApplicationAnalysisSnapshot(
     recentApplications: prepared
       .sort((a, b) => b.sortDate - a.sortDate)
       .slice(0, 100)
-      .map(({ sortDate: _sortDate, ...application }) => application),
+      .map(({ sortDate, ...application }) => { void sortDate; return application }),
   }
 }
