@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Copy, KeyRound, LogOut, Mail, Megaphone, RefreshCw, Search, Send, Ticket, Trash2, UserPlus, UserRound, Users } from 'lucide-react'
 import RichTextEditor from '@/components/admin/RichTextEditor'
@@ -45,7 +45,7 @@ export default function AdminDashboard() {
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const response = await fetch('/api/admin/users', { cache: 'no-store' })
@@ -59,9 +59,11 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [router])
 
-  useEffect(() => { void load() }, [])
+  // Load remote admin data and synchronize its loading indicator.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void load() }, [load])
 
   const visibleUsers = useMemo(() => {
     const needle = query.trim().toLowerCase()

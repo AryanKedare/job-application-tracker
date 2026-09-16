@@ -109,6 +109,8 @@ export default function ApplicationLifecycleDialog({ open, setOpen, job, userId,
     setLoading(false)
   }, [job.id, onError, open, userId])
 
+  // This effect loads remote stages and synchronizes the loading indicator.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load() }, [load])
 
   const orderedStages = useMemo(() => [...stages].sort((a, b) => a.position - b.position || (a.created_at ?? '').localeCompare(b.created_at ?? '')), [stages])

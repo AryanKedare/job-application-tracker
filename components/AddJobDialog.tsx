@@ -58,11 +58,13 @@ export default function AddJobDialog({ open, setOpen, onSuccess, onError, userId
 
   useEffect(() => {
     if (open) {
+      // Reset the editable form when the selected dialog record changes.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFormData(formFromJob(editJob))
       setResumeFile(null)
       setUrlError(null)
     }
-  }, [open, editJob?.id])
+  }, [open, editJob])
 
   const field = <K extends keyof typeof formData>(key: K, value: (typeof formData)[K]) =>
     setFormData((previous) => ({ ...previous, [key]: value }))

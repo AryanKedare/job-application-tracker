@@ -78,6 +78,8 @@ export default function CompanyAvatar({ company, fallbackName }: Props) {
   useEffect(() => {
     let cancelled = false
     const cached = cacheKey ? iconCache.get(cacheKey) ?? null : null
+    // Synchronize the rendered icon with the external shared image cache.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIconSrc(cached)
 
     if (!companyName || cached) return () => { cancelled = true }

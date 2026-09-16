@@ -131,7 +131,7 @@ export async function groqJson<T>(
   const requestedModels = options?.models
     ?? (logoDomainLookup ? logoDomainModels() : jobImportLookup ? importModels() : undefined)
 
-  for (const model of modelsToTry(requestedModels)) {
+  for (const model of modelsToTry(requestedModels).slice(0, 2)) {
     try {
       const response = await fetch(GROQ_ENDPOINT, {
         method: 'POST',
@@ -147,7 +147,7 @@ export async function groqJson<T>(
           messages,
           ...(options?.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
           ...(typeof options?.includeReasoning === 'boolean' ? { include_reasoning: options.includeReasoning } : {}),
-          ...(options?.maxCompletionTokens ? { max_completion_tokens: options.maxCompletionTokens } : {}),
+          max_completion_tokens: Math.min(options?.maxCompletionTokens ?? 1800, 1800),
         }),
       })
 
@@ -224,6 +224,7 @@ export async function groqWebJson<T>(
         model,
         temperature: 0,
         response_format: { type: 'json_object' },
+        max_completion_tokens: 1024,
         messages,
         compound_custom: {
           tools: {

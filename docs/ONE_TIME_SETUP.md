@@ -28,7 +28,7 @@ Vercel is the reference deployment platform because the repository includes a Ve
 ```bash
 git clone https://github.com/AryanKedare/job-application-tracker.git
 cd job-application-tracker
-npm install
+npm ci
 ```
 
 ## 3. Create a Supabase project
@@ -60,6 +60,7 @@ The setup creates/configures:
 - `public.application_stage_events`
 - `public.invite_codes`
 - `public.company_logo_cache`
+- `public.app_memberships`, shared security counters/work leases, and analysis report reservations
 - indexes and constraints
 - application/stage Row-Level Security
 - append-only lifecycle history
@@ -105,7 +106,12 @@ Expected access model:
 
 Supabase/PostgREST can take a few seconds to refresh its schema cache after setup.
 
-## 6. Configure Supabase Auth URLs
+## 6. Disable public signup and configure Supabase Auth URLs
+
+In Supabase Auth settings, **disable Allow new users to sign up**. This is required for invitation-only onboarding. Test direct signup rejection with a disposable staging address and the public anon key. UI-only `shouldCreateUser: false` is insufficient.
+
+The database also enforces server-owned `app_memberships` for application data, resumes, and paid services. Auth invitations create membership automatically; editable user metadata cannot grant access. For existing accounts and the required rollout sequence, follow [Security upgrade](SECURITY_UPGRADE.md).
+
 
 For local development:
 
@@ -280,6 +286,8 @@ Run:
 
 ```bash
 npm run lint
+npm test
+npm audit --audit-level=low
 npm run build
 ```
 
@@ -336,7 +344,7 @@ After the production deployment:
 
 ## Upgrading an existing installation
 
-Before schema changes, take a database backup.
+Before schema changes, take a database backup. Follow [Security upgrade](SECURITY_UPGRADE.md), including disabling public signups and reviewing existing membership before deploying the new routes.
 
 Run the current complete:
 

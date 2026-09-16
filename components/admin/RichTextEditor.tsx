@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Bold,
   Heading2,
@@ -49,12 +49,14 @@ const COMMANDS: Command[] = [
 
 export default function RichTextEditor({ value, onChange, disabled = false, maxTextLength = 10_000 }: Props) {
   const editorRef = useRef<HTMLDivElement>(null)
+  const [textLength, setTextLength] = useState(0)
 
   const emitChange = () => {
     const editor = editorRef.current
     if (!editor) return
 
     const text = editor.innerText.replace(/\u00a0/g, ' ')
+    setTextLength(text.trim() ? text.length : 0)
     if (!text.trim()) {
       if (editor.innerHTML) editor.innerHTML = ''
       onChange('', '')
@@ -68,6 +70,8 @@ export default function RichTextEditor({ value, onChange, disabled = false, maxT
     const editor = editorRef.current
     if (!editor || editor.innerHTML === value) return
     editor.innerHTML = value
+    // Synchronize character count after updating the external contentEditable DOM.
+    setTextLength(editor.innerText.replace(/\u00a0/g, ' ').length)
   }, [value])
 
   useEffect(() => {
@@ -110,7 +114,6 @@ export default function RichTextEditor({ value, onChange, disabled = false, maxT
     emitChange()
   }
 
-  const textLength = editorRef.current?.innerText.replace(/\u00a0/g, ' ').length ?? 0
   const tooLong = textLength > maxTextLength
 
   return (

@@ -1,15 +1,16 @@
 import type { User } from '@supabase/supabase-js'
 import { z } from 'zod'
+import { beginAiWork, finishAiWork, requireMembership, SecurityControlError } from '@/lib/security-controls'
 
 import {
-  AnalysisJob,
-  AnalysisStage,
-  ApplicationAnalysisSnapshot,
+  type AnalysisJob,
+  type AnalysisStage,
+  type ApplicationAnalysisSnapshot,
   buildApplicationAnalysisSnapshot,
 } from '@/lib/application-analysis'
-import { AnalysisInsights, buildApplicationAnalysisPdf } from '@/lib/analysis-pdf'
+import { type AnalysisInsights, buildApplicationAnalysisPdf } from '@/lib/analysis-pdf'
 import { getAdminSupabase } from '@/lib/admin-supabase'
-import { groqJson, GroqResponseFormat } from '@/lib/groq'
+import { groqJson, type GroqResponseFormat } from '@/lib/groq'
 import { getResendConfig, sendPdfEmail } from '@/lib/resend-broadcast'
 
 const MAX_APPLICATIONS = 1000
@@ -181,19 +182,11 @@ export function monthlyPeriodKey(date = new Date()) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-export function lastAnalysisReportTimestamp(user: User) {
-  const raw = user.app_metadata?.analysis_report_last_sent_at
-  if (typeof raw !== 'string') return null
-  const timestamp = new Date(raw).getTime()
-  return Number.isNaN(timestamp) ? null : timestamp
-}
-
 export async function sendApplicationAnalysisReport(
   user: User,
   options: {
     mode: AnalysisReportMode
     periodKey?: string
-    idempotencyKey: string
   },
 ) {
   if (!user.email || !user.email_confirmed_at) {
@@ -213,6 +206,37 @@ export async function sendApplicationAnalysisReport(
     }
   }
 
+  await requireMembership(user.id)
+  const supabase = getAdminSupabase()
+  const { data: jobId, error: reservationError } = await supabase.rpc('reserve_analysis_report', {
+    p_user_id: user.id, p_period: periodKey ?? null,
+  })
+  if (reservationError) throw new SecurityControlError('Report reservations are temporarily unavailable.', 503)
+  if (!jobId) throw new SecurityControlError('A report is already reserved. Please wait before trying again.', 429, 900)
+  let lease: string | undefined
+  try {
+    lease = await beginAiWork(user.id, 'analysis')
+    const result = await generateReservedReport(user, { ...options, idempotencyKey: `analysis-${jobId}` })
+    const { error } = await supabase.from('analysis_report_jobs')
+      .update({ status: 'sent', finished_at: new Date().toISOString() }).eq('id', jobId).select('id').single()
+    if (error) throw new Error('Could not persist report completion.')
+    return result
+  } catch (error) {
+    const { error: persistError } = await supabase.from('analysis_report_jobs')
+      .update({ status: 'failed', finished_at: new Date().toISOString() }).eq('id', jobId)
+    if (persistError) console.error('Could not persist report failure', { code: persistError.code })
+    throw error
+  } finally {
+    if (lease) await finishAiWork(lease)
+  }
+}
+
+async function generateReservedReport(user: User, options: {
+  mode: AnalysisReportMode; periodKey?: string; idempotencyKey: string
+}) {
+  if (!user.email) throw new AnalysisReportSkip('unconfirmed_email')
+  const monthly = options.mode === 'monthly'
+  const periodKey = monthly ? options.periodKey : undefined
   const supabase = getAdminSupabase()
   const [{ data: jobs, error: jobsError }, { data: stages, error: stagesError }] = await Promise.all([
     supabase
@@ -336,7 +360,8 @@ export async function sendApplicationAnalysisReport(
     nextAppMetadata.monthly_analysis_last_sent_at = generatedAt.toISOString()
   }
 
-  await supabase.auth.admin.updateUserById(user.id, { app_metadata: nextAppMetadata })
+  const { error: metadataError } = await supabase.auth.admin.updateUserById(user.id, { app_metadata: nextAppMetadata })
+  if (metadataError) throw new Error('Report sent, but completion metadata could not be saved.')
 
   return {
     userId: user.id,
